@@ -12,7 +12,11 @@ import { createTranscriptStore } from '../core/transcript/index.ts'
 import {
   SESSION_SCHEMA_V,
   asStoredSession,
+  deleteSession,
+  listSessions,
+  loadSession,
   newSessionId,
+  saveSession,
   titleFromPrompt,
   type StoredSession,
 } from '../core/session/index.ts'
@@ -75,7 +79,51 @@ section('模型层', () => {
   check('合法数据能穿过校验', asStoredSession(makeSession('ok'))?.id === 'ok', 'id 原样保留')
 })
 
-// ── 第 2 组：读写（T4 追加）───────────────────────────────────────────────
+// ── 第 2 组：读写 ─────────────────────────────────────────────────────────
+section('读写', () => {
+  const one = makeSession('20260918-120000-aaaa', {
+    title: '第一轮',
+    turns: [
+      {
+        user: 'q1',
+        thinking: ['想一下'],
+        tools: [
+          { name: 'read_file', arg: 'a.ts', params: { path: 'a.ts', offset: 1 }, status: 'ok', out: ['1| const a = 1'] },
+        ],
+        answer: ['答案一'],
+      },
+    ],
+  })
+  const saved = saveSession(one)
+  check('落盘路径在会话目录内', saved.startsWith(dir) && saved.endsWith('20260918-120000-aaaa.json'), saved)
+  check('目录里没有 .tmp 残留（原子写）', !readdirSync(dir).some((f) => f.endsWith('.tmp')), readdirSync(dir).join(' '))
+
+  const back = loadSession('20260918-120000-aaaa')
+  check(
+    '读回来与写进去一致（含嵌套 params 与工具输出）',
+    JSON.stringify(back) === JSON.stringify(one),
+    back ? `turns=${back.turns.length} tools=${back.turns[0]?.tools.length}` : '读回 null',
+  )
+
+  // 再写一个更新的会话 + 一个坏文件，验证排序与容错
+  saveSession(makeSession('20260918-130000-bbbb', { title: '第二轮', updatedAt: '2099-01-01T00:00:00.000Z' }))
+  writeFileSync(join(dir, '20260918-140000-cccc.json'), '{ 这不是 JSON', 'utf8')
+  const all = listSessions()
+  check(
+    '列表按 updatedAt 倒序且跳过坏文件',
+    all.length === 2 && all[0]?.id === '20260918-130000-bbbb' && all.every((s) => s.id !== '20260918-140000-cccc'),
+    all.map((s) => s.id).join(' '),
+  )
+  check('坏文件读出来是 null 而不是抛错', loadSession('20260918-140000-cccc') === null, 'loadSession 返回 null')
+
+  check(
+    '删除返回 true 并真的删掉',
+    deleteSession('20260918-120000-aaaa') && !existsSync(join(dir, '20260918-120000-aaaa.json')),
+    '文件已消失',
+  )
+  check('重复删除返回 false', deleteSession('20260918-120000-aaaa') === false, '第二次 false')
+})
+
 // ── 第 3 组：重放（T6 追加）───────────────────────────────────────────────
 // ── 第 4 组：记录器（T8 追加）─────────────────────────────────────────────
 

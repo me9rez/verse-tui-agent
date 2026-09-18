@@ -9,3 +9,12 @@ export {
   type StoredTool,
   type StoredTurn,
 } from './model.ts'
+export {
+  deleteSession,
+  latestSession,
+  listSessions,
+  loadSession,
+  saveSession,
+  sessionDir,
+  sessionPath,
+} from './store.ts'
