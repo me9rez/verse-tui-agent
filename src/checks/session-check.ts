@@ -12,6 +12,7 @@ import { createTranscriptStore } from '../core/transcript/index.ts'
 import {
   SESSION_SCHEMA_V,
   asStoredSession,
+  createTurnRecorder,
   deleteSession,
   listSessions,
   loadSession,
@@ -189,6 +190,40 @@ section('重放', () => {
 })
 
 // ── 第 4 组：记录器（T8 追加）─────────────────────────────────────────────
+
+// ── 第 4 组：记录器 ───────────────────────────────────────────────────────
+section('记录器', () => {
+  const rec = createTurnRecorder()
+  rec.begin('  第一问  ')
+  // 思考按 delta 喂进来：跨行要自己拆行（与 LineStream 同样的判据）
+  rec.thinkingDelta('先看')
+  rec.thinkingDelta('代码。\n再看排版。\n半行没收尾')
+  rec.thinkingEnd()
+  rec.toolStart({ name: 'read_file', arg: 'a.ts', id: 't1', params: { path: 'a.ts' } })
+  rec.toolLine({ name: 'read_file', arg: 'a.ts', id: 't1' }, '1| const a = 1')
+  rec.toolEnd({ name: 'read_file', arg: 'a.ts', id: 't1' }, 'ok')
+  rec.answerDelta('答案第一行\n答案第二行\n尾部半行')
+  const turn = rec.finish(false)
+
+  check('用户输入被压平空白', turn.user === '第一问', JSON.stringify(turn.user))
+  check(
+    '思考按行切分，未收尾的半行也保留',
+    JSON.stringify(turn.thinking) === JSON.stringify(['先看代码。', '再看排版。', '半行没收尾']),
+    JSON.stringify(turn.thinking),
+  )
+  check('工具事件与状态被记录', turn.tools.length === 1 && turn.tools[0]?.status === 'ok', JSON.stringify(turn.tools[0]))
+  check(
+    '工具输出与 params 分开存',
+    turn.tools[0]?.out.length === 1 && turn.tools[0]?.params?.path === 'a.ts',
+    `out=${turn.tools[0]?.out.length} params=${JSON.stringify(turn.tools[0]?.params)}`,
+  )
+  check(
+    '正文按行切分',
+    JSON.stringify(turn.answer) === JSON.stringify(['答案第一行', '答案第二行', '尾部半行']),
+    JSON.stringify(turn.answer),
+  )
+  check('finish 后记录器可复用（不串上一轮）', rec.finish(false).answer.length === 0, '第二次为空轮')
+})
 
 // ── 跑 ────────────────────────────────────────────────────────────────────
 for (const [title, fn] of groups) {
