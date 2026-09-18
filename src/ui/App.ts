@@ -17,16 +17,19 @@ import { TText, TView } from '@simon_he/vue-tui'
 import { TTranscriptView, TRenderPlane } from '@simon_he/vue-tui/agent'
 import { TInputBox, useTerminal } from '@simon_he/vue-tui/vue'
 import type { TerminalKeyboardEvent } from '@simon_he/vue-tui/runtime'
-import { createTranscriptStore, type Group, type LineStream, type ToolEntry, type TranscriptStore } from './transcript.ts'
-import { createMockSession } from './agent/mockSession.ts'
-import { createLiveSession } from './agent/liveSession.ts'
-import { createAiSdkSession } from './agent/aiSdkSession.ts'
-import type { AgentSession, ToolStep, TurnSink } from './agent/session.ts'
-import { describeProvider, dotEnvResult } from './env.ts'
-import { styles } from './theme.ts'
-import { cellWidth, formatDuration, padTo } from './text.ts'
+import { layoutOf } from './layout.ts'
+import { HELP, HINT, NL, fitLine, stripControlChars } from './texts.ts'
+import { createTurnSink, type Phase } from './turn-sink.ts'
+import { createTranscriptStore, type TranscriptStore } from '../core/transcript/index.ts'
+import { createMockSession } from '../agent/mockSession.ts'
+import { createLiveSession } from '../agent/liveSession.ts'
+import { createAiSdkSession } from '../agent/aiSdkSession.ts'
+import type { AgentSession } from '../agent/session.ts'
+import { describeProvider, dotEnvResult } from '../core/env.ts'
+import { styles } from '../core/theme.ts'
+import { formatDuration } from '../core/text.ts'
 
-export type Phase = 'idle' | 'thinking' | 'tool' | 'answering'
+export type { Phase } from './turn-sink.ts'
 
 export type AppApi = {
   submit(text: string): void
@@ -44,48 +47,6 @@ export type AppApi = {
   screenText(): string[]
   state(): { phase: Phase; streaming: boolean; tokens: number; turns: number; tools: number; session: string }
 }
-
-function layoutOf(rows: number) {
-  const hintY = Math.max(8, rows - 1)
-  const inputY = hintY - 3
-  const statusY = inputY - 1
-  const transcriptY = 1
-  return {
-    headerY: 0,
-    transcriptY,
-    transcriptH: Math.max(3, statusY - transcriptY),
-    statusY,
-    inputY,
-    hintY,
-  }
-}
-
-const HELP = [
-  '可用命令：',
-  '  /help    显示这份说明',
-  '  /clear   清空转写',
-  '  /long    跑一段长回答（演示滚动与自动贴底）',
-  '  /live    切到真实模型流（需要 VT_BASE_URL / VT_MODEL）',
-  '  /ai      切到 AI SDK 工具 agent（read/write/edit/bash/ls）',
-  '  /env     看当前 provider 配置（不回显密钥）',
-  '  /mock    切回本地剧本',
-  '  /fold    折叠/展开全部（同一个 Ctrl+O）',
-  '  /exit    退出',
-].join('\n')
-
-const NL = String.fromCharCode(10)
-
-/** 去掉 C0/C1 控制字符，保留 tab 与换行；终端里注入的键序列常带这些标记。 */
-function stripControlChars(value: string): string {
-  return [...value]
-    .filter((ch) => {
-      const code = ch.codePointAt(0) ?? 0
-      return code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127)
-    })
-    .join('')
-}
-
-const HINT = 'Enter 发送 · Esc 中断 · 点标题或 Ctrl+T 折叠最近一组 · Ctrl+O 全部折叠/展开 · /help · Ctrl+C 退出'
 
 export const App = defineComponent({
   name: 'ClaudeCodeDemo',
@@ -161,83 +122,9 @@ export const App = defineComponent({
       ui.elapsedMs = 0
       startTicker()
 
-      // 放在容器里：这几个值只在 sink 回调里被赋值，局部 let 会被 TS 收窄成 null。
-      const live: { thinking: LineStream | null; answer: LineStream | null } = {
-        thinking: null,
-        answer: null,
-      }
-      // 工具分组按 toolCallId 建键：一个 step 里并发多个工具调用也不会串行错位
-      type ToolLive = { group: Group; head: ToolEntry; outStarted: boolean }
-      const toolGroups = new Map<string, ToolLive>()
-      const keyOf = (tool: ToolStep): string => tool.id ?? `${tool.name}::${tool.arg}`
-      const thinkingGroup: { id: string | null } = { id: null }
-
-      /** 思考说完就自动收起（Claude Code 的行为）；点标题可再展开 */
-      const collapseThinking = () => {
-        if (thinkingGroup.id) store.setGroupCollapsed(thinkingGroup.id, true)
-        thinkingGroup.id = null
-      }
-      const ensureTool = (tool: ToolStep): ToolLive => {
-        const key = keyOf(tool)
-        let live = toolGroups.get(key)
-        if (!live) {
-          // 参数在开组时就作为组内前几行进表，展开即可见
-          const { group, head } = store.startToolGroup({ name: tool.name, arg: tool.arg, params: tool.params })
-          live = { group, head, outStarted: false }
-          toolGroups.set(key, live)
-        }
-        return live
-      }
-
-      const sink: TurnSink = {
-        thinkingDelta(delta) {
-          if (!live.thinking) {
-            const g = store.startThinkingGroup()
-            thinkingGroup.id = g.id
-            live.thinking = store.stream('system', { group: g.id })
-            live.answer = null
-            ui.phase = 'thinking'
-          }
-          live.thinking.push(delta)
-        },
-        thinkingEnd() {
-          live.thinking?.end()
-          live.thinking = null
-          collapseThinking()
-        },
-        toolStart(tool: ToolStep) {
-          live.thinking?.end()
-          live.thinking = null
-          collapseThinking()
-          live.answer = null
-          ensureTool(tool)
-          ui.phase = 'tool'
-        },
-        toolLine(tool: ToolStep, line: string) {
-          const t = ensureTool(tool)
-          if (!t.outStarted) {
-            store.groupSection(t.group.id, 'out')
-            t.outStarted = true
-          }
-          store.groupBody(t.group.id, line)
-        },
-        toolEnd(tool: ToolStep, status) {
-          store.setToolStatus(ensureTool(tool).head, status)
-          toolGroups.delete(keyOf(tool))
-          ui.phase = 'thinking'
-        },
-        answerDelta(delta) {
-          if (!live.answer) {
-            live.thinking?.end()
-            live.thinking = null
-            collapseThinking()
-            store.blank()
-            live.answer = store.stream('assistant')
-            ui.phase = 'answering'
-          }
-          live.answer.push(delta)
-        },
-      }
+      const { sink, finish } = createTurnSink(store, (phase) => {
+        ui.phase = phase
+      })
 
       const chunkDelayMs = props.speed <= 0 ? 0 : Math.max(1, Math.round(12 * props.speed))
       try {
@@ -249,11 +136,7 @@ export const App = defineComponent({
           sleep,
         })
       } finally {
-        live.thinking?.end()
-        live.answer?.end()
-        for (const t of toolGroups.values()) store.setToolStatus(t.head, 'ok')
-        toolGroups.clear()
-        if (ui.aborted) store.addNote('⎿ 已中断 · 本轮输出到此为止')
+        finish(ui.aborted)
         ui.streaming = false
         ui.phase = 'idle'
         stopTicker()
@@ -380,7 +263,7 @@ export const App = defineComponent({
         .filter(Boolean)
         .join(' · ')
       const left = `${phaseText.value}${ui.streaming ? '  (Esc 中断)' : ''}`
-      return padTo(left, Math.max(1, cols - 2 - cellWidth(right))) + right
+      return fitLine(cols, left, right)
     })
 
     const api: AppApi = {
@@ -428,9 +311,7 @@ export const App = defineComponent({
       // 关键：在分支之前先读一次 version，让整个渲染函数成为它的依赖。
       // 否则「空态」那一支不读任何响应式值，视图永远不会被唤醒去渲染正文。
       const version = store.version.value
-      const header =
-        padTo('✻ Claude Code · vue-tui demo', Math.max(1, cols - 2 - cellWidth(sessionRef.value.label))) +
-        sessionRef.value.label
+      const header = fitLine(cols, '✻ Claude Code · vue-tui demo', sessionRef.value.label)
       const empty = store.rowCount() === 0
 
       return h(TView, { x: 0, y: 0, w: cols, h: size.value.rows, onKeydownCapture: onKey }, () => [

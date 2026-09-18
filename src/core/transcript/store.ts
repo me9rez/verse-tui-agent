@@ -1,136 +1,24 @@
 /**
- * 转写数据源：Claude Code 风格的「一行一行」模型 + 可折叠分组。
+ * 转写存储与行级流。
  *
- * 三个实测结论决定了现在的写法（都用 src/probe-toolrow.ts 探过）：
- *   1. TTranscriptView 把一行里的 segments 当**同一段落**排版，段内换行不会断行
- *      ——所以正文按物理行拆 row，一行一个 row，流式增量只改当前行。
- *   2. `kind: 'tool-call'` 的行会自己画 ▸/▾ 折叠标记，也有点击/键盘热区
- *      ——标记白拿。
- *   3. 但它的 `body` 同样是段落式，装不下「参数 + 多行输出」
- *      ——所以真正的显隐由本文件自己过滤：分组折叠时，隐藏该组除头部以外的所有行。
- *        头部行的 `collapsed` 只用来让库画对 ▸/▾。
+ *   LineStream      —— 流式增量按行累积：遇换行封行开新行，增量只改「当前行」
+ *   TranscriptStore —— 行集合、可折叠分组、可见行过滤、版本号（决定重绘范围）
  *
- * 分组（Group）就是把「思考」「一次工具调用」各自的头部行 + 内容行绑在一起，
- * 点击头部（或 Ctrl+O / Ctrl+T）切换 collapsed，过滤规则随之生效。
+ * 折叠的显隐由 visibleEntries() 过滤实现；头部行的 collapsed 只用于让库画对 ▸/▾。
  */
 import { ref } from 'vue'
 import type { Style } from '@simon_he/vue-tui/core'
-import type { TTranscriptDataSource, TTranscriptRow, TTranscriptSegment } from '@simon_he/vue-tui/agent'
-import { styles } from './theme.ts'
-
-export type Role = 'user' | 'assistant' | 'system' | 'tool'
-export type Preset = 'plain' | 'code' | 'heading' | 'bullet' | 'quote' | 'dim' | 'note'
-export type GroupKind = 'thinking' | 'tool'
-export type ToolStatus = 'running' | 'ok' | 'error'
-
-export type Group = {
-  id: string
-  kind: GroupKind
-  collapsed: boolean
-  /** 组内内容行数（不含头部），用于折叠后的「N 行」提示 */
-  lines: number
-  /** tool 组的状态（头部行状态由它同步） */
-  status?: ToolStatus
-}
-
-export type LineEntry = {
-  kind: 'line'
-  key: string
-  role: Role
-  text: string
-  preset: Preset
-  /** 属于哪个分组 */
-  group?: string
-  /** 分组头部行 */
-  head?: boolean
-  rev: number
-}
-
-export type ToolEntry = {
-  kind: 'tool'
-  key: string
-  title: string
-  status: ToolStatus
-  group: string
-  head: true
-  rev: number
-}
-
-export type Entry = LineEntry | ToolEntry
+import type { TTranscriptDataSource, TTranscriptRow } from '@simon_he/vue-tui/agent'
+import { styles } from '../theme.ts'
+import { formatParams } from './markdown.ts'
+import { toLineRow, toToolRow } from './rows.ts'
+import type { Entry, Group, GroupKind, LineEntry, Preset, Role, ToolEntry, ToolStatus } from './types.ts'
 
 let seq = 0
 const nextKey = (prefix: string) => `${prefix}-${++seq}`
 
 /** 行内 markdown：`code` / **bold** / *italic* / [text](url) */
-function inlineSegments(text: string, base: Style, codeStyle: Style): TTranscriptSegment[] {
-  const out: TTranscriptSegment[] = []
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))|(\*[^*]+\*)/g
-  let last = 0
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text))) {
-    if (m.index > last) out.push({ text: text.slice(last, m.index), style: base })
-    const token = m[0]!
-    if (token.startsWith('`')) {
-      out.push({ text: token.slice(1, -1), style: codeStyle })
-    } else if (token.startsWith('**')) {
-      out.push({ text: token.slice(2, -2), style: { ...base, bold: true } })
-    } else if (token.startsWith('[')) {
-      const close = token.indexOf('](')
-      out.push({ text: token.slice(1, close), style: base, href: token.slice(close + 2, -1) })
-    } else {
-      out.push({ text: token.slice(1, -1), style: { ...base, italic: true } })
-    }
-    last = re.lastIndex
-  }
-  if (last < text.length) out.push({ text: text.slice(last), style: base })
-  if (!out.length) out.push({ text: '', style: base })
-  return out
-}
 
-function presetBase(preset: Preset, role: Role): Style {
-  if (preset === 'code') return styles.code
-  if (preset === 'heading') return styles.heading
-  if (preset === 'bullet') return styles.text
-  if (preset === 'quote') return styles.quote
-  if (preset === 'dim' || preset === 'note') return styles.dim
-  if (role === 'user') return styles.user
-  if (role === 'assistant') return styles.text
-  if (role === 'tool') return styles.toolOut
-  return styles.dim
-}
-
-/**
- * 工具参数 → 组内「值行」（不含 section 标题；由 appendGroupBlock 统一加缩进）。
- * 全空就返回空数组——没参数的调用不该硬打一个空块出来。
- */
-export function formatParams(params: Record<string, unknown> | undefined, limit = 8): string[] {
-  if (!params) return []
-  const out: string[] = []
-  let shown = 0
-  for (const [key, value] of Object.entries(params)) {
-    if (shown >= limit) {
-      out.push('…（参数过多，其余略）')
-      break
-    }
-    if (value === undefined || value === null) continue
-    let text: string
-    if (typeof value === 'string') {
-      if (!value) continue
-      text = value.length > 80 ? `(${value.length} 字符，已省略)` : value.replace(/\s+/g, ' ').trim()
-    } else {
-      text = JSON.stringify(value)
-    }
-    if (text.length > 120) text = `${text.slice(0, 117)}…`
-    out.push(`${key}: ${text}`)
-    shown++
-  }
-  return out
-}
-
-/**
- * 一次流式输出 = 一个 LineStream：内部维护「当前行」，遇到换行就封行开新行。
- * 给 group 时，产出的行都挂在那个分组下（折叠时会被整体隐藏）。
- */
 export class LineStream {
   private store: TranscriptStore
   private role: Role
@@ -472,44 +360,6 @@ export class TranscriptStore implements TTranscriptDataSource {
   /** 可见行是否属于某个分组（点击处理用） */
   entryAt(index: number): Entry | undefined {
     return this.visibleEntries()[index]
-  }
-}
-
-function toLineRow(entry: LineEntry, group: Group | undefined): TTranscriptRow {
-  const base = presetBase(entry.preset, entry.role)
-  const segments: TTranscriptSegment[] = []
-  if (entry.head && group) {
-    // 分组头部：自己画折叠标记（库的段落式排版塞不下多行 body，所以显隐由数据源过滤）
-    segments.push({ text: `${group.collapsed ? '▸' : '▾'} ${entry.text}`, style: styles.thinkingHeader })
-    if (group.lines > 0) {
-      segments.push({
-        text: group.collapsed ? `  · ${group.lines} 行已折叠` : `  · ${group.lines} 行`,
-        style: styles.faint,
-      })
-    }
-    return { kind: 'message', key: entry.key, role: 'system', segments, selectableText: entry.text }
-  }
-  // 缩进层级：分组头部 0 → 组内正文 2（正文里的 section 值再由 store 自己 +2）→ 非分组 0
-  if (entry.role === 'user') segments.push({ text: '> ', style: styles.userPrompt })
-  else if (entry.group) segments.push({ text: '  ', style: base })
-  segments.push(...inlineSegments(entry.text, base, styles.inlineCode))
-  return { kind: 'message', key: entry.key, role: entry.role, segments, selectableText: entry.text }
-}
-
-function toToolRow(entry: ToolEntry, group: Group | undefined): TTranscriptRow {
-  const collapsed = group?.collapsed ?? false
-  const dot = entry.status === 'error' ? '✗' : '●'
-  const suffix = entry.status === 'running' ? '  …' : entry.status === 'ok' ? '  · ok' : '  · error'
-  const hidden = collapsed && group && group.lines > 0 ? `  · ${group.lines} 行已折叠` : ''
-  return {
-    kind: 'tool-call',
-    key: entry.key,
-    title: `${dot} ${entry.title}${suffix}${hidden}`,
-    // 只用于让库画对 ▸/▾；真正的显隐由 visibleEntries() 过滤
-    collapsed,
-    summary: [],
-    body: [],
-    selectableText: entry.title,
   }
 }
 

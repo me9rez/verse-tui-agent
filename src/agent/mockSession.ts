@@ -7,8 +7,8 @@
  *    终端里看到的 out: 是真实输出，不是写死的假数据。
  */
 import { spawn } from 'node:child_process'
-import { chunkText } from '../text.ts'
-import type { AgentSession, StreamStep, ToolStep, TurnContext } from './session.ts'
+import { chunkText } from '../core/text.ts'
+import type { AgentSession, StreamStep, TurnContext } from './session.ts'
 
 type RealCommand = { file: string; args: string[]; cwd?: string }
 

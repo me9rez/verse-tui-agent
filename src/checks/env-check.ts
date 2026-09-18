@@ -13,7 +13,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { loadDotEnv } from './env.ts'
+import { loadDotEnv } from '../core/env.ts'
 
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
 const check = (name: string, ok: boolean, detail: string) => checks.push({ name, ok, detail })

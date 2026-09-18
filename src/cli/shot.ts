@@ -11,10 +11,10 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
-import { App, type AppApi } from './App.ts'
-import { styles } from './theme.ts'
-import { rowsToHtml, type CellLike } from './html.ts'
-import { loadDotEnv } from './env.ts'
+import { App, type AppApi } from '../ui/App.ts'
+import { styles } from '../core/theme.ts'
+import { rowsToHtml, type CellLike } from '../core/html.ts'
+import { loadDotEnv } from '../core/env.ts'
 
 // .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
 loadDotEnv()

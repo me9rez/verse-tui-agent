@@ -6,11 +6,11 @@
   "type": "module",
   "packageManager": "pnpm@12.4.2",
   "scripts": {
-    "dev": "node src/terminal.ts",
-    "smoke": "node src/smoke.ts && node src/env-check.ts",
-    "shot": "node src/shot.ts",
-    "live": "node src/live-check.ts",
-    "agent": "node src/agent-check.ts",
+    "dev": "node src/cli/terminal.ts",
+    "smoke": "node src/checks/smoke.ts && node src/checks/env-check.ts",
+    "shot": "node src/cli/shot.ts",
+    "live": "node src/checks/live-check.ts",
+    "agent": "node src/checks/agent-check.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "license": "ISC",

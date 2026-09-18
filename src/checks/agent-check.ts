@@ -13,10 +13,10 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
-import { App, type AppApi } from './App.ts'
-import { rowsToHtml } from './html.ts'
-import { styles } from './theme.ts'
-import { loadDotEnv } from './env.ts'
+import { App, type AppApi } from '../ui/App.ts'
+import { rowsToHtml } from '../core/html.ts'
+import { styles } from '../core/theme.ts'
+import { loadDotEnv } from '../core/env.ts'
 
 // .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
 loadDotEnv()

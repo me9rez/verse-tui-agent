@@ -3,9 +3,9 @@
  * 用法：VT_DEBUG_PROMPT=... node src/debug-agent.ts
  */
 import { spawn } from 'node:child_process'
-import { createAiSdkSession } from './agent/aiSdkSession.ts'
-import type { TurnSink } from './agent/session.ts'
-import { loadDotEnv } from './env.ts'
+import { createAiSdkSession } from '../agent/aiSdkSession.ts'
+import type { TurnSink } from '../agent/session.ts'
+import { loadDotEnv } from '../core/env.ts'
 
 // .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
 loadDotEnv()

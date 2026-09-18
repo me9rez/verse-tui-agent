@@ -14,7 +14,7 @@ pnpm smoke             # 无头验证：10 项渲染断言 + 9 项 .env 行为�
 pnpm typecheck         # tsc -p（不含 emit）
 ```
 
-要求 Node ≥ 22（本 demo 直接用 `node src/terminal.ts` 跑 TypeScript，靠 Node 自带的类型剥离，不需要 tsx/esbuild/打包器）。
+要求 Node ≥ 22（本 demo 直接用 `node src/cli/terminal.ts` 跑 TypeScript，靠 Node 自带的类型剥离，不需要 tsx/esbuild/打包器）。
 
 ## 配置：.env
 
@@ -94,11 +94,11 @@ agent 工作区  C:\workspace\vue-tui-demo\.agent-sandbox
 
 ```
 ▸ ✻ Thinking · 2 行已折叠（点我展开）
-▸ ● Read  src/transcript.ts  ok · 17 行已折叠（点我展开）
+▸ ● Read  src/core/transcript/index.ts  ok · 17 行已折叠（点我展开）
 ▸ ● Bash  node -e "统计 src 下各文件行数"  ok · 23 行已折叠（点我展开）
 ```
 
-实现要点（三条都是实测出来的，探针留在 `src/probe-toolrow.ts` / `src/probe-foldmark.ts`）：
+实现要点（三条都是实测出来的，探针留在 `src/probes/toolrow.ts` / `src/probes/foldmark.ts`）：
 
 | 事实 | 做法 |
 |---|---|
@@ -202,28 +202,44 @@ live 模式目前**只做纯文本流，不解析 tool-call**（mock 剧本才�
 
 ```
 src/
-  env.ts               .env / .env.local 加载（真实环境优先，只回报键名）
-  env-check.ts         加载器行为断言（9 项，秒级）
-  terminal.ts          交互式入口：createTerminalApp + stdout 渲染器 + stdin driver + 清理
-  App.ts               版面与交互（顶栏 / 转写 / 状态栏 / 输入框 / 提示行）
-  transcript.ts        转写数据源（TTranscriptDataSource）+ 行级 markdown + LineStream
-  theme.ts             配色与样式 token
-  text.ts              cell 宽度、按列截断、流式分块
-  agent/session.ts     会话接缝类型（AgentSession / StreamStep）
-  agent/mockSession.ts 本地剧本（工具步骤会真的起子进程跑命令）
-  agent/liveSession.ts OpenAI 兼容端点的 SSE 流（含 reasoning_content → 思考行）
-  agent/aiSdkSession.ts AI SDK 工具 agent：read/write/edit/bash/ls + 工具循环
-  smoke.ts             无头断言（mock 剧本）+ 串跑 env-check
-  live-check.ts        真实 API 的端到端检查（流式/落屏/markdown/错误/中断）
-  agent-check.ts       AI SDK agent 的端到端检查（工具真跑 + fs 独立核对）
-  debug-agent.ts       不带 TUI 的二分脚本（排查是 SDK 层还是渲染层卡住）
-  probe-toolrow.ts     探针：tool-call row 的多行 body / 折叠行为
-  probe-foldmark.ts    探针：折叠标记在「有/无 body」下的渲染
-  probe-indent.ts      探针：库对不同 role 的默认缩进（结论：都是 0）
-  probe-layout.ts      探针：把转写行与缓冲区的前导空格按 JSON 打出来，排版回归用
-  html.ts              buffer → 带色 HTML（shot / live-check / agent-check 共用）
-  shot.ts              把跑完的 buffer 转成带色 HTML（截图/归档用）
+  cli/                   可执行入口（人跑的东西）
+    terminal.ts            交互式 TUI：createTerminalApp + stdout 渲染器 + stdin driver + 清理
+    shot.ts                出图：把跑完的 buffer 转成带色 HTML（多轮用 ;; 分隔）
+  checks/                断言脚本：退出码即结果，失败即事实
+    smoke.ts               渲染/流式/折叠的 16 项断言 + 屏幕快照产物（mock，离线）
+    live-check.ts          真实 SSE 端点的 6 项断言（流式/落屏/markdown/错误/中断）
+    agent-check.ts         AI SDK 工具 agent 的 10 项断言（含用 fs 独立核对模型写下的文件）
+    env-check.ts           .env 加载行为的 9 项断言（优先级/覆盖/坏行/密钥不外泄）
+  probes/                一次性探针：摸清库行为与排版回归
+    toolrow.ts             tool-call row 的多行 body 与折叠行为
+    foldmark.ts            折叠标记在「有/无 body」下的渲染
+    indent.ts              库对不同 role 的默认缩进（实测都是 0）
+    layout.ts              把转写行与缓冲区的前导空格按 JSON 打出来
+    debug-agent.ts         不带 TUI 的二分脚本（判断卡在 SDK 层还是渲染层）
+  ui/                    界面层
+    App.ts                 组件装配：版面摆放、命令、键盘、对外的 AppApi
+    layout.ts              版面坐标（layoutOf）与 Layout 类型
+    texts.ts               命令帮助、提示栏、状态行对齐、输入清洗
+    turn-sink.ts           一轮对话的事件映射（思考/工具/正文 → 分组），Phase 定义在此
+  core/                  底座（与界面、会话都无关）
+    transcript/            转写模型，三层分明
+      types.ts               行/分组的类型（叶子模块，无依赖）
+      markdown.ts            行级 markdown 与参数格式化（纯函数）
+      rows.ts                entry → TTranscriptRow（缩进、折叠标记）
+      store.ts               LineStream + TranscriptStore（分组、可见行过滤、版本号）
+      index.ts               对外桶文件
+    env.ts                 .env / .env.local 加载（真实环境变量优先）
+    text.ts                cell 宽度、按列截断、流式分块
+    theme.ts               配色与样式 token
+    html.ts                buffer → 带色 HTML（shot / 三个 check 共用）
+  agent/                 会话层（同一接缝的多个实现）
+    session.ts             接缝类型（AgentSession / StreamStep / ToolStep / TurnSink）
+    mockSession.ts         本地剧本（工具步骤真的起子进程跑命令）
+    liveSession.ts         裸 SSE 纯文本流
+    aiSdkSession.ts        AI SDK 工具 agent（read/write/edit/bash/ls）
 ```
+
+导入方向是单向的：`cli/checks/probes → ui/agent → core`，core 内部 `store → rows → markdown → types`，没有反向依赖，也没有循环。`checks/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
 
 ## 流式是怎么实现的
 
@@ -270,7 +286,7 @@ src/
 ✔ 产生了多帧提交 — commit 次数 512
 ✔ 正文进入转写（数据层完整）/ 正文末尾画在屏幕上（自动贴底）
 ✔ 工具输出是真实子进程 — 含 Read 的真实源码行与行数统计
-✔ 工具调用显示了参数 — 展开态工具组含 params 块：path: src/transcript.ts
+✔ 工具调用显示了参数 — 展开态工具组含 params 块：path: src/core/transcript/index.ts
 ✔ 思考被归成一个分组并自动收起 — groups=[thinking(collapsed,2 行), tool(17 行), tool(23 行)]
 ✔ 折叠真的隐藏了内容行 — 可见行 65 → 25；折叠后仍能读到「合计」=false
 ✔ 展开真的恢复内容行 — 可见行 25 → 67（此前 65 是「思考已自动收起」的混合态）
@@ -287,7 +303,7 @@ src/
 出图（Linux/macOS 用 xvfb 或直接有显示时同理）：
 
 ```bash
-VT_SHOT_ROWS=64 node src/shot.ts     # → .artifacts/demo.html（带色，可浏览器打开）
+VT_SHOT_ROWS=64 node src/cli/shot.ts     # → .artifacts/demo.html（带色，可浏览器打开）
 chrome --headless=new --screenshot=demo.png --window-size=960,1250 file:///<abs>/.artifacts/demo.html
 ```
 
