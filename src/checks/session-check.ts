@@ -16,6 +16,7 @@ import {
   listSessions,
   loadSession,
   newSessionId,
+  replaySession,
   saveSession,
   titleFromPrompt,
   type StoredSession,
@@ -35,6 +36,7 @@ function section(title: string, fn: () => Promise<void> | void): void {
 }
 
 // 独立的临时会话目录 + 造一个合法会话的工厂
+const NL = String.fromCharCode(10)
 const dir = mkdtempSync(join(tmpdir(), 'verse-sessions-'))
 process.env.VT_SESSION_DIR = dir
 
@@ -124,7 +126,68 @@ section('读写', () => {
   check('重复删除返回 false', deleteSession('20260918-120000-aaaa') === false, '第二次 false')
 })
 
-// ── 第 3 组：重放（T6 追加）───────────────────────────────────────────────
+// ── 第 3 组：重放 ─────────────────────────────────────────────────────────
+section('重放', () => {
+  const turns = [
+    {
+      user: '这个 demo 的流式输出是怎么实现的？',
+      thinking: ['先看 LineStream 的 push。', '再看 store 怎么过滤可见行。'],
+      tools: [
+        {
+          name: 'read_file',
+          arg: 'src/core/transcript/store.ts',
+          params: { path: 'src/core/transcript/store.ts', offset: 96 },
+          status: 'ok' as const,
+          out: ['102|       this.commit(line)', '103|     }'],
+        },
+        {
+          name: 'bash',
+          arg: 'node -e "统计行数"',
+          params: { command: 'node -e "…"' },
+          status: 'ok' as const,
+          out: ['96  src/agent/liveSession.ts'],
+        },
+      ],
+      answer: [
+        '关键就三步：',
+        '1. 会话层产出增量，按 2~3 字符一块吐。',
+        '```ts',
+        'push(delta: string) {',
+        '  this.pending += delta',
+        '}',
+        '```',
+      ],
+    },
+    { user: '那折叠呢？', thinking: ['手风琴规则在 turn-sink。'], tools: [], answer: ['一轮里只有当前组展开。'], aborted: true },
+  ]
+  const session = makeSession('20260918-150000-dddd', { turns })
+
+  const store = createTranscriptStore()
+  replaySession(session, store)
+  // 内容断言看**全量** entries：重放收尾会把分组全部收起（与实时路径一致），
+  // 折叠组里的思考/工具输出在 visibleEntries() 里本来就不该出现（那是另一条断言）。
+  const text = store.entries.map((e) => (e.kind === 'line' ? e.text : e.title)).join(NL)
+
+  check(
+    '重放出两条用户消息',
+    store.entries.filter((e) => e.kind === 'line' && e.role === 'user').length === 2,
+    '2 条',
+  )
+  check(
+    '正文与思考都回来了',
+    text.includes('关键就三步') && text.includes('先看 LineStream 的 push'),
+    '含正文首句与思考首句',
+  )
+  check('代码块仍被判为 code（围栏重放正确）', store.visibleEntries().some((e) => e.kind === 'line' && e.preset === 'code'), '存在 preset=code 的行')
+  check('工具输出与参数都回来了', text.includes('this.commit(line)') && text.includes('params'), '含工具输出与 params 段')
+  check('中断的那轮带上了提示行', text.includes('已中断'), '含「已中断」')
+  check(
+    '重放后分组全部收起（与实时路径的收尾一致）',
+    store.groupSummary().length > 0 && store.groupSummary().every((g) => g.collapsed),
+    `组数 ${store.groupSummary().length}，收起 ${store.groupSummary().filter((g) => g.collapsed).length}`,
+  )
+})
+
 // ── 第 4 组：记录器（T8 追加）─────────────────────────────────────────────
 
 // ── 跑 ────────────────────────────────────────────────────────────────────

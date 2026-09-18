@@ -18,3 +18,4 @@ export {
   sessionDir,
   sessionPath,
 } from './store.ts'
+export { replaySession } from './replay.ts'
