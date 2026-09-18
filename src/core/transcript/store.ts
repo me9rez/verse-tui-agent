@@ -11,6 +11,7 @@ import type { Style } from '@simon_he/vue-tui/core'
 import type { TTranscriptDataSource, TTranscriptRow } from '@simon_he/vue-tui/agent'
 import { styles } from '../theme.ts'
 import { formatParams } from './markdown.ts'
+import { langOf, type Lang } from '../syntax.ts'
 import { toLineRow, toToolRow } from './rows.ts'
 import type { Entry, Group, GroupKind, LineEntry, Preset, Role, ToolEntry, ToolStatus } from './types.ts'
 
@@ -25,6 +26,8 @@ export class LineStream {
   private pending = ''
   private current: LineEntry | null = null
   private inFence = false
+  /** 当前围栏的语言：开栏时记下来，栏内每一行都带上（决定用哪张关键字表上色） */
+  private fenceLang: Lang = 'plain'
   private head: string | undefined
   private indent: string
   private group: string | undefined
@@ -60,14 +63,10 @@ export class LineStream {
     return entry
   }
 
-  /** 行级样式判定：围栏 / 标题 / 列表 / 引用 */
-  private classOf(raw: string): { preset: Preset; text: string } | null {
+  /** 行级样式判定：围栏内 / 标题 / 列表 / 引用（纯函数，不再改围栏状态——那是 commit 的事） */
+  private classOf(raw: string): { preset: Preset; text: string; lang?: Lang } | null {
     const trimmed = raw.trim()
-    if (/^(```|~~~)/.test(trimmed)) {
-      this.inFence = !this.inFence
-      return null // 围栏标记本身不占一行
-    }
-    if (this.inFence) return { preset: 'code', text: `${this.indent}  ${raw}` }
+    if (this.inFence) return { preset: 'code', text: `${this.indent}  ${raw}`, lang: this.fenceLang }
     const h = /^#{1,6}\s+(.*)$/.exec(trimmed)
     if (h) return { preset: 'heading', text: `${this.indent}${h[1]}` }
     const b = /^[-*]\s+(.*)$/.exec(trimmed)
@@ -78,16 +77,29 @@ export class LineStream {
     return { preset: 'plain', text: `${this.indent}${raw}` }
   }
 
-  private apply(cls: { preset: Preset; text: string }): void {
+  private apply(cls: { preset: Preset; text: string; lang?: Lang }): void {
     const entry = this.current ?? this.openLine(cls.preset)
     entry.preset = cls.preset
     entry.text = cls.text
+    // 语言只在 code 行上有意义；换行复用 entry 时要清掉，否则上一行的 lang 会串到纯文本行
+    if (cls.lang) entry.lang = cls.lang
+    else delete entry.lang
     entry.rev++
     this.store.bump()
   }
 
-  /** 封行：写完当前行后不再复用它（classOf 对围栏行有副作用，每行只判一次） */
+  /** 封行：写完当前行后不再复用它 */
   private commit(raw: string): void {
+    const trimmed = raw.trim()
+    if (/^(```|~~~)/.test(trimmed)) {
+      // 围栏标记只在这里翻转一次状态，且自己不占一行。
+      // （此前这段逻辑放在 classOf 里，而 classOf 会被未完成行的每个增量调用一次，
+      //   于是同一个 ``` 被翻转奇偶次 —— 围栏状态时对时错，靠运气。）
+      this.inFence = !this.inFence
+      this.fenceLang = this.inFence ? langOf(trimmed) : 'plain'
+      this.current = null
+      return
+    }
     const cls = this.classOf(raw)
     if (cls) this.apply(cls)
     this.current = null
@@ -102,6 +114,9 @@ export class LineStream {
       this.commit(line)
     }
     if (this.pending) {
+      const t = this.pending.trim()
+      // 未完成的行前缀是 ` 或 ~ 时先不渲染：它可能是围栏标记，是否开栏要等封行才知道
+      if (t.startsWith('`') || t.startsWith('~')) return
       const cls = this.classOf(this.pending)
       if (cls) this.apply(cls)
     }

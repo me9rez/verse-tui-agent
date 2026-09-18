@@ -163,6 +163,49 @@ check(
   groupsAfterFirst.some((g) => g.kind === 'thinking' && g.collapsed && g.lines > 0),
   `groups=${JSON.stringify(groupsAfterFirst)}`,
 )
+
+// —— 颜色：断言读的是 row 里的 segments（数据层），不是屏幕像素 ——
+type Seg = { text?: string; style?: { fg?: string; bg?: string } }
+const rowsJson = (): Array<Record<string, unknown>> => {
+  const out: Array<Record<string, unknown>> = []
+  for (let i = 0; i < api.store.rowCount(); i++) out.push(api.store.getRow(i) as Record<string, unknown>)
+  return out
+}
+const segsOf = (row: Record<string, unknown> | undefined): Seg[] =>
+  Array.isArray(row?.segments) ? (row!.segments as Seg[]) : []
+const fgsOf = (row: Record<string, unknown> | undefined): string[] =>
+  [...new Set(segsOf(row).map((s) => s.style?.fg).filter((v): v is string => !!v))]
+// 代码行：底色是 codeBg（正文里只有代码块用这个底色）。单行可能只有「基础色 + 函数色」
+// 两种，所以要跨行取并集才说明高亮器真的在工作（关键字/函数/注释至少两类）。
+const codeRows = rowsJson().filter(
+  (r) => segsOf(r).length >= 2 && segsOf(r).every((s) => s.style?.bg === '#23252e'),
+)
+const codeFgs = [...new Set(codeRows.flatMap((r) => fgsOf(r)))]
+check(
+  '代码块按语言上色',
+  codeRows.length > 0 && codeFgs.length >= 3,
+  `${codeRows.length} 行代码，合计 ${codeFgs.length} 种前景色：${codeFgs.slice(0, 5).join(' ')}`,
+)
+// 分组头部的颜色：工具组按工具类型着色、思考组是暗色斜体 —— 至少要有两种才叫区分
+const headRows = rowsJson().filter(
+  (r) =>
+    /^[▸▾] /.test(segsOf(r)[0]?.text ?? '') ||
+    (r.kind === 'tool-call' && Array.isArray(r.summary) && (r.summary as Seg[]).length > 0),
+)
+const headFgs = [
+  ...new Set(
+    headRows
+      .flatMap((r) => (r.kind === 'tool-call' ? (r.summary as Seg[]) : segsOf(r)))
+      .map((s) => s.style?.fg)
+      .filter((v): v is string => !!v),
+  ),
+]
+check(
+  '分组头部按类型上色',
+  headFgs.length >= 2,
+  `头部出现 ${headFgs.length} 种颜色：${headFgs.join(' ')}`,
+)
+
 check(
   '折叠真的隐藏了内容行',
   nowCollapsed === true && collapsedRows < expandedRows && !collapsedText.includes('合计'),

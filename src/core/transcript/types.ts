@@ -4,6 +4,8 @@
  * 叶子模块：不 import store / rows，避免循环依赖——store 依赖 rows，rows 依赖 markdown，
  * markdown 与本文件只依赖 theme 和库类型。
  */
+import type { Lang } from '../syntax.ts'
+
 export type Role = 'user' | 'assistant' | 'system' | 'tool'
 export type Preset = 'plain' | 'code' | 'heading' | 'bullet' | 'quote' | 'dim' | 'note'
 export type GroupKind = 'thinking' | 'tool'
@@ -25,6 +27,8 @@ export type LineEntry = {
   role: Role
   text: string
   preset: Preset
+  /** code 行的围栏语言（`ts` / `bash` / `diff` …），决定用哪张关键字表上色 */
+  lang?: Lang
   /** 属于哪个分组 */
   group?: string
   /** 分组头部行 */

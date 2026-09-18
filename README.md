@@ -17,7 +17,7 @@
 - **工具**：AI SDK 工具循环（`read_file` / `write_file` / `edit_file` / `bash` / `ls`），`bash` 的 stdout **边跑边写进转写**。
 - **三路会话**：离线 mock 剧本（默认，保证离线可演示）/ 裸 SSE 纯文本流 / AI SDK 工具 agent —— `/mock` `/live` `/ai` 随时切。
 - **provider 配在 `.env`**：`.env` → `.env.local` 后者覆盖，命令行里已有的变量永不被文件覆盖。
-- **无头可验证**：三套断言脚本（25 + 6 + 10 项），退出码即结论；关键结论用 `fs` 独立核对，不采信模型自述。
+- **无头可验证**：三套断言脚本（27 + 6 + 10 项），退出码即结论；关键结论用 `fs` 独立核对，不采信模型自述。
 
 依赖极简：`node` 直接跑 TypeScript（类型剥离），**没有打包器、没有构建步骤**。
 
@@ -34,7 +34,7 @@ pnpm dev                # 交互式
 | 命令 | 说明 |
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
-| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 16 项 + `.env` 加载行为 9 项（离线，不需要 key） |
+| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 18 项 + `.env` 加载行为 9 项（离线，不需要 key） |
 | `pnpm live` | 无头：真实 SSE 端点的纯文本流 6 项 |
 | `pnpm agent` | 无头：AI SDK 工具 agent 10 项（含用 `fs` 独立核对模型写下的文件） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
@@ -162,6 +162,26 @@ VUE_TUI_COLOR_MODE=ansi16 node src/probes/color.ts   # 按转义形式分类计�
 
 > 缺口：库**不认 `NO_COLOR`**（43 个 dist 文件里一次都没出现），也没有单色档——`parseColorMode` 只认上面四个值。要彻底去色只能在终端侧做。
 
+### 彩色输出：哪些地方真的有颜色
+
+四级降级只是底色，具体配色分五类，全部集中在 `src/core/theme.ts`：
+
+| 位置 | 上色方式 |
+| --- | --- |
+| **代码块** | 按围栏语言做语法高亮：关键字 / 字符串 / 数字 / 函数名 / 类型 / 注释 各一色。实现在 `src/core/syntax.ts`（约 200 行，关键字表驱动，**不引 shiki / highlight.js**——那些库产出 HTML 或主题 JSON，几百 KB 起步还得再映射回 ANSI） |
+| **工具组头部** | 按工具类型上色：`read*` 蓝 · `write*` 绿 · `edit*` 琥珀 · `bash` 橙 · `ls` 青 · `grep` 品红。名字做前缀归一化，mock 剧本的 `Read(...)` 与 AI SDK 的 `read_file` 都认 |
+| **工具参数** | `key:` 暗灰 + 值亮色分两段，扫参数时不用逐字读 |
+| **分组头部** | 思考组暗色斜体，工具组按类型（见上），折叠后追加的「N 行已折叠」统一淡灰 |
+| **其它** | 用户消息 `>` 前缀用 accent 色、状态栏按状态绿/红、markdown 行内 `code` 带底色、正文里的 `**粗体**`/`*斜体*`/链接各有样式 |
+
+支持高亮的围栏语言：`ts` / `js` / `json` / `bash` / `yaml` / `diff`（` ```diff ` 的 `+` / `-` / `@@` 行红绿分明）；其它围栏回落成单色代码块——**认不出语言只损失颜色，不影响可读性**。
+
+```bash
+node src/probes/codecolor.ts    # 把「整行都是代码底色」的 row 连 style 一起打出来，看每段是什么颜色
+```
+
+写这段时被自己的断言抓出两个 bug（见「踩过的坑」最后两条）：围栏状态被流式增量翻转奇偶次、以及三个引用了但从未定义的样式 token 让整行静默不上色。
+
 ## 架构
 
 ```
@@ -170,7 +190,7 @@ src/
     terminal.ts            交互式 TUI：createTerminalApp + stdout 渲染器 + stdin driver + 退出清理
     shot.ts                出图：把跑完的 buffer 转成带色 HTML（多轮用 ;; 分隔）
   checks/                断言脚本：退出码即结果
-    smoke.ts               渲染 / 流式 / 折叠 16 项（离线 mock）
+    smoke.ts               渲染 / 流式 / 折叠 / 颜色 18 项（离线 mock）
     live-check.ts          真实 SSE 端点 6 项
     agent-check.ts         AI SDK 工具 agent 10 项（含 fs 独立核对）
     env-check.ts           .env 加载行为 9 项（优先级 / 覆盖 / 坏行 / 不外泄）
@@ -240,7 +260,7 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|
-| `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 16 + 9 = 25 |
+| `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 18 + 9 = 27 |
 | `pnpm live` | 真实 SSE 端点的纯文本流 | 6 |
 | `pnpm agent` | 真实 API + 真实工具循环（含 `fs` 独立核对） | 10 |
 
@@ -290,6 +310,11 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 - **`bash` 必须设输出上限，否则会堵死事件循环**：模型跑 `dir /b *.txt | find /c /v ""` 时，`find` 命中的是 git-bash 里的 MSYS 版本，变成全盘遍历、吐出几万行；每行都写进响应式 store 触发一次调度 → **事件循环被饿死，连 `setInterval` 心跳都停了**。现在的做法是：最多显示 200 行 / 64KB，超限杀进程树，并把 `%SystemRoot%\System32` 提到 PATH 最前面（让 Windows 的 `find.exe` 赢过 MSYS 的）。
 - **Windows 上只等 `'close'` 事件不够**：孙子进程（`dir | find`）不退出时 `kill()` 杀不掉管道，工具会永远 pending。改成 `taskkill /T /F` 杀进程树 + `'exit'` 兜底 + 硬超时。
 - **出图时 Chrome 的 `--screenshot=` 用相对路径会静默不写文件**（退出码 0，磁盘上还是旧图）：给绝对路径，并确认文件的修改时间变了再拿去用。
+
+**自己写的数据源也会错得很隐蔽**
+
+- **带副作用的状态判定不能放在「每次增量都会调」的函数里**：原先「遇到 ``` 就翻转 `inFence`」写在 `classOf()` 里，而 `classOf()` 对**未完成的行每个流式增量都会调一次**、封行时又调一次 → 同一个 ```` ```ts ```` 被翻转奇偶次，围栏状态时对时错（表现是代码块有时单色、有时压根没被当成代码）。现在围栏只在 `commit()`（封行，每行一次）里翻转，`classOf()` 是纯函数。
+- **`styles` / `syntax` 别标成 `Record<string, Style>`**：那样 `styles.thinkingHeader` 这类拼错的键 tsc 查不出来，运行时拿到 `undefined` → 那一行**静默不上色**（终端不会报错）。本仓库曾有 3 个这样的引用（`thinkingHeader` / `userPrompt` / `dim`，其中 `dim` 影响所有工具输出行），改成强类型 const 后 tsc 立刻全部报出来。
 
 ## 已知边界
 
