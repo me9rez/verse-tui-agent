@@ -34,7 +34,7 @@ pnpm dev                # 交互式
 | 命令 | 说明 |
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
-| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 18 项 + `.env` 加载行为 9 项（离线，不需要 key） |
+| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 20 项 + `.env` 加载行为 9 项（离线，不需要 key） |
 | `pnpm live` | 无头：真实 SSE 端点的纯文本流 6 项 |
 | `pnpm agent` | 无头：AI SDK 工具 agent 10 项（含用 `fs` 独立核对模型写下的文件） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
@@ -102,13 +102,13 @@ agent 工作区  <repo>/.agent-sandbox
 
 噪音文案一律去掉：折叠行不重复「（点我展开）」（提示栏里说一次就够），无参数的调用不打「（无参数）」，状态用 `· ok` / `· err` 与标题分开。工具输出**按原样显示**，不为了对齐去改工具自己的格式。
 
-**展开态**（工具带 `params` 块）：
+**流式进行中**：只有正在写的那一块是展开的，前面的组自动收起（截图是跑到第二个工具时的状态，状态栏显示 `Running tool…`）：
+
+![流式中](docs/streaming.png)
+
+**手动展开全部**（`Ctrl+O` 或点标题；工具带 `params` 块）：
 
 ![展开态](docs/fold-expanded.png)
-
-**折叠态**（头部只留状态与行数，内容仍在内存里）：
-
-![折叠态](docs/fold-collapsed.png)
 
 ```
 ▸ ✻ Thinking  · 2 行已折叠
@@ -136,7 +136,20 @@ agent 工作区  <repo>/.agent-sandbox
     ...
 ```
 
-思考组在**回答开始时会自动收起**，点标题或 `Ctrl+T` 随时展开；一轮结束后工具组保持展开，方便看输出。
+**折叠规则（手风琴）**：一轮进行中只有**正在写的那块**展开，它一出现前面的组就自动收起；正文开始流式输出时（此时没有「当前组」）全部收起；**一轮结束（含 Esc 中断）后全部收起**。想细看就点标题或 `Ctrl+T`（最近一组）/ `Ctrl+O`（全部折叠或展开）。
+
+规则落在两处：`store.soloExpand(keepId?)`（只留一个展开，或全部收起）与 `src/ui/turn-sink.ts` 里的四处调用——新建思考组 / 新建工具组 / 正文开始 / 回合收尾。想改回「工具组保持展开」，把 `finish()` 里那行 `store.soloExpand()` 删掉即可。
+
+轨迹可以用探针一眼看全：
+
+```bash
+node src/probes/foldrule.ts
+#   thinking  展开: thinking(1行)
+#   tool      展开: tool(4行)          ← 思考组收起，当前工具组展开
+#   tool      展开: tool(13行)         ← 第二个工具出现，前一个收起
+#   answering 展开: （无，全部收起）    ← 正文开始
+#   idle      展开: （无，全部收起）    ← 回合结束
+```
 
 > `pnpm live` / `pnpm agent` 会真的打端点：背靠背连续跑会撞上游 RPM 限流（实测免费档 10 RPM），
 > 报 `AI_APICallError: request limited RPM reached` 时等一分钟再单跑一次即可，不是代码问题。
@@ -190,7 +203,7 @@ src/
     terminal.ts            交互式 TUI：createTerminalApp + stdout 渲染器 + stdin driver + 退出清理
     shot.ts                出图：把跑完的 buffer 转成带色 HTML（多轮用 ;; 分隔）
   checks/                断言脚本：退出码即结果
-    smoke.ts               渲染 / 流式 / 折叠 / 颜色 18 项（离线 mock）
+    smoke.ts               渲染 / 流式 / 折叠 / 颜色 20 项（离线 mock）
     live-check.ts          真实 SSE 端点 6 项
     agent-check.ts         AI SDK 工具 agent 10 项（含 fs 独立核对）
     env-check.ts           .env 加载行为 9 项（优先级 / 覆盖 / 坏行 / 不外泄）
@@ -260,7 +273,7 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|
-| `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 18 + 9 = 27 |
+| `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 20 + 9 = 29 |
 | `pnpm live` | 真实 SSE 端点的纯文本流 | 6 |
 | `pnpm agent` | 真实 API + 真实工具循环（含 `fs` 独立核对） | 10 |
 
@@ -268,23 +281,27 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 
 ```
 # pnpm smoke（离线）
-✔ 流式是增量的 — 采样 232 次，version 跨度 492
-✔ 产生了多帧提交 — commit 次数 541
+✔ 流式是增量的 — 采样 224 次，version 跨度 499
+✔ 产生了多帧提交 — commit 次数 521
+✔ 思考与每次工具调用各自成组 — 3 个分组（1 个 thinking + 2 个 tool）
+✔ 流式中只展开当前组（手风琴） — 采样 224 次，展开组数最大值 1（期望 ≤ 1）
+✔ 回合结束后分组全部收起 — 3 个分组，收起 3 个
 ✔ 工具调用显示了参数 — 展开态工具组含 params 块：path: src/core/transcript/store.ts
-✔ 思考被归成一个分组并自动收起 — groups=[thinking(collapsed,2 行), tool(19 行), tool(34 行)]
-✔ 折叠真的隐藏了内容行 — 可见行 82 → 29；折叠后仍能读到「合计」= false
-✔ 展开真的恢复内容行 — 可见行 29 → 84（82 是「思考已自动收起」的混合态）
+✔ 折叠真的隐藏了内容行 — 可见行 88 → 29；折叠后仍能读到「合计」= false
+✔ 展开真的恢复内容行 — 可见行 29 → 88（展开基线经显式展开取得，往返无损）
+✔ 代码块按语言上色 — 5 行代码，合计 5 种前景色：#c9d1f2 #7fb3ff #c678dd #56b6c2 #6f7480
+✔ 分组头部按类型上色 — 头部出现 4 种颜色：#8b8b93 #5a5a63 #7fb3ff #d97757
 
-# pnpm live（真实端点，约 1186 tok 的一轮）
-✔ 端点真的在流式返回 — 采样 722 次，version 跨度 1014
-✔ 模型文本进入了转写 — 9 行正文，约 1186 tok
-✔ markdown 被解析成结构化行 — 行样式集合：plain/code
-✔ 耗时合理 — 整轮 23.1s
+# pnpm live（真实端点，约 1875 tok 的一轮）
+✔ 端点真的在流式返回 — 采样 562 次，version 跨度 1478
+✔ 模型文本进入了转写 — 21 行正文，约 1875 tok
+✔ markdown 被解析成结构化行 — 行样式集合：code/plain/bullet
+✔ 耗时合理 — 整轮 19.6s
 
 # pnpm agent（真实 API + 真实工具）
 ✔ 模型写下的文件在磁盘上真的存在且内容正确 — 磁盘上 3 行，第 2 行含关键句
-✔ bash 的真实输出进了转写 — 工具输出 48 行；含 demo.txt = true
-✔ 流式是增量的 — 采样 1096 次，version 跨度 1161
+✔ bash 的真实输出进了转写 — 工具输出 31 行；含 demo.txt = true
+✔ 流式是增量的 — 采样 372 次，version 跨度 237
 ✔ 折叠真的收起内容（可见行下降 + ▸ 标记） — 可见行 88 → 40
 ✔ 再展开恢复（▾ 且行数变多） — 可见行 40 → 205
 ```

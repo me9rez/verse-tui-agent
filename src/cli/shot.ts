@@ -35,6 +35,9 @@ const PROMPTS = (
   .map((p) => p.trim())
   .filter(Boolean)
 const speed = Number(process.env.VT_SPEED ?? '0.05') || 0.05
+// 中途快照：等某个工具组展开（= 一轮正跑到工具阶段）就立刻出图，不等整轮结束。
+// 用来拍「流式中只有当前组是展开的」这个状态。
+const midTool = process.env.VT_SHOT_MIDTOOL === '1'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -75,8 +78,17 @@ for (const prompt of PROMPTS) {
   // submit 只是启动一轮（异步），先等它真的开跑，再等它跑完——否则立刻查 streaming 会是 false。
   const deadline = Date.now() + (live ? 120_000 : 30_000)
   while (!api.state().streaming && Date.now() < deadline) await sleep(5)
-  while (api.state().streaming && Date.now() < deadline) await sleep(20)
-  await api.whenIdle()
+  if (midTool) {
+    // 等到「有工具组正展开」的那一帧就停手：那一刻正是「当前组展开、前面的已收起」。
+    // 配合 VT_SPEED 放慢节奏，抓到的就是一个稳定的流式中状态。
+    while (Date.now() < deadline) {
+      if (api.groups().some((g) => g.kind === 'tool' && !g.collapsed)) break
+      await sleep(10)
+    }
+  } else {
+    while (api.state().streaming && Date.now() < deadline) await sleep(20)
+    await api.whenIdle()
+  }
   await sleep(60)
 }
 

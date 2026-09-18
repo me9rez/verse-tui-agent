@@ -211,6 +211,10 @@ const visibleText = (): string =>
     .visibleEntries()
     .map((e) => (e.kind === 'line' ? e.text : e.title))
     .join(NL)
+// 回合结束后的默认态是「分组全部收起」（手风琴规则的收尾），
+// 所以要测 params 展示与折叠往返，得先显式展开一遍拿到真实基线。
+api.toggleAll()
+await sleep(30)
 const expandedPayload = payloadText()
 const expandedText = visibleText()
 const expandedRows = api.store.rowCount()
@@ -236,7 +240,7 @@ const reExpandedPayload = payloadText()
 check(
   '再展开恢复（▾ 且行数变多）',
   reExpanded === false && reExpandedRows > collapsedRows && reExpandedPayload.includes('▾'),
-  `可见行 ${collapsedRows} → ${reExpandedRows}（比折叠前 ${expandedRows} 多，因为那次思考还收着）`,
+  `可见行 ${collapsedRows} → ${reExpandedRows}（与展开基线 ${expandedRows} 一致即说明往返无损）`,
 )
 
 const failures = checks.filter((c) => !c.ok)

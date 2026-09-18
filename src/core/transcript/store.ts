@@ -263,6 +263,24 @@ export class TranscriptStore implements TTranscriptDataSource {
     return last.id
   }
 
+  /**
+   * 手风琴：只留 keepId 这个组展开，其余全部收起（不传 keepId 则全收起）。
+   *
+   * 一轮进行中由 turn-sink 调用，实现「正在写的那块展开、前面的一律收起」；
+   * 一轮结束（或正文开始流式输出时）也用同一入口把全部收起。
+   */
+  soloExpand(keepId?: string): void {
+    let changed = false
+    for (const g of this.groups.values()) {
+      const shouldCollapse = keepId === undefined || g.id !== keepId
+      if (g.collapsed !== shouldCollapse) {
+        g.collapsed = shouldCollapse
+        changed = true
+      }
+    }
+    if (changed) this.bump()
+  }
+
   setToolStatus(head: ToolEntry, status: ToolStatus): void {
     head.status = status
     head.rev++

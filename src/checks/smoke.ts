@@ -76,18 +76,23 @@ const storeText = (): string => api.store.entries.map((e) => (e.kind === 'line' 
 
 // ── 第 1 轮：流式增量 ────────────────────────────────────────────────
 const versionSamples: number[] = []
+// 手风琴不变式：一轮进行中，展开的分组数任何时刻都不能超过 1
+const openGroupSamples: number[] = []
 api.submit(PROMPT_1)
 const deadline = Date.now() + 20_000
 // 先等这一轮真的开跑（submit 是异步启动），再采样——否则第一帧就会漏掉。
 while (!api.state().streaming && Date.now() < deadline) await sleep(2)
 while (api.state().streaming && Date.now() < deadline) {
   versionSamples.push(api.store.version.value)
+  openGroupSamples.push(api.groups().filter((g) => !g.collapsed).length)
   await sleep(3)
 }
 await api.whenIdle()
 
 const afterFirst = screenText()
 const firstState = api.state()
+const groupsAfterTurn = api.groups()
+
 
 // ── 折叠/展开：数据层（可见行）与屏幕层都要跟着变 ────────────────────
 const visText = (): string =>
@@ -101,6 +106,9 @@ const rowPayloadText = (): string => {
   for (let i = 0; i < api.store.rowCount(); i++) parts.push(JSON.stringify(api.store.getRow(i)))
   return parts.join(NL)
 }
+// 回合结束后是「全收起」，先展开全部作为基线，再测折叠往返
+api.toggleAll()
+await sleep(20)
 const expandedPayload = rowPayloadText()
 const groupsAfterFirst = api.groups()
 const expandedText = visText()
@@ -119,7 +127,10 @@ const reExpandedPayload = rowPayloadText()
 // ── 第 2 轮：中断 ────────────────────────────────────────────────────
 const rowsBeforeLong = api.store.rowCount()
 api.submit(PROMPT_LONG)
-await sleep(120)
+await sleep(60)
+// /long 会先清空转写：基线要取「清空后、这一轮开跑时」的行数
+const rowsAtLongStart = api.store.rowCount()
+await sleep(60)
 api.interrupt()
 await api.whenIdle()
 await sleep(20)
@@ -159,8 +170,9 @@ check(
   `展开态工具组含 params 块：${/(command|path): .{0,40}/.exec(expandedText)?.[0] ?? '(没找到)'}`,
 )
 check(
-  '思考被归成一个分组并自动收起',
-  groupsAfterFirst.some((g) => g.kind === 'thinking' && g.collapsed && g.lines > 0),
+  '思考与每次工具调用各自成组',
+  groupsAfterFirst.some((g) => g.kind === 'thinking' && g.lines > 0) &&
+    groupsAfterFirst.filter((g) => g.kind === 'tool').length >= 2,
   `groups=${JSON.stringify(groupsAfterFirst)}`,
 )
 
@@ -207,6 +219,16 @@ check(
 )
 
 check(
+  '流式中只展开当前组（手风琴）',
+  openGroupSamples.length > 0 && Math.max(...openGroupSamples) <= 1,
+  `采样 ${openGroupSamples.length} 次，展开组数最大值 ${openGroupSamples.length ? Math.max(...openGroupSamples) : '-'}（期望 ≤ 1）`,
+)
+check(
+  '回合结束后分组全部收起',
+  groupsAfterTurn.length > 1 && groupsAfterTurn.every((g) => g.collapsed),
+  `${groupsAfterTurn.length} 个分组，收起 ${groupsAfterTurn.filter((g) => g.collapsed).length} 个`,
+)
+check(
   '折叠真的隐藏了内容行',
   nowCollapsed === true && collapsedRows < expandedRows && !collapsedText.includes('合计'),
   `可见行 ${expandedRows} → ${collapsedRows}；折叠后仍能读到「合计」=${collapsedText.includes('合计')}`,
@@ -235,8 +257,8 @@ check(
 check('响应式宽度未溢出', finalScreen.every((line) => line.length <= COLS), `所有行 ≤ ${COLS} 列`)
 check(
   'Esc 能中断一轮',
-  api.store.rowCount() > rowsBeforeLong && /已中断/.test(afterInterrupt),
-  `行数 ${rowsBeforeLong} → ${api.store.rowCount()}；屏上出现中断提示=${/已中断/.test(afterInterrupt)}`,
+  api.store.rowCount() > rowsAtLongStart && /已中断/.test(afterInterrupt),
+  `这一轮从 ${rowsAtLongStart} 行涨到 ${api.store.rowCount()} 行（清空前是 ${rowsBeforeLong} 行）；屏上出现中断提示=${/已中断/.test(afterInterrupt)}`,
 )
 
 const failures = checks.filter((c) => !c.ok)

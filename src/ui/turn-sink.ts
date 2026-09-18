@@ -24,7 +24,13 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
   const keyOf = (tool: ToolStep): string => tool.id ?? `${tool.name}::${tool.arg}`
   const thinkingGroup: { id: string | null } = { id: null }
 
-  /** 思考说完就自动收起（参考答案的默认行为）；点标题可再展开 */
+  /**
+   * 一轮进行中的折叠规则（手风琴）：只有**正在写的那块**展开，前面的全部收起。
+   *   - 新的思考组出现 → 收起之前的
+   *   - 新的工具组出现 → 收起之前的（思考组也随之收起）
+   *   - 正文开始流式输出 → 此时没有「当前组」，于是全部收起
+   * 一轮结束时由 finish() 再全部收起一次（用户手点展开的也不例外，规则就是这么定的）。
+   */
   const collapseThinking = (): void => {
     if (thinkingGroup.id) store.setGroupCollapsed(thinkingGroup.id, true)
     thinkingGroup.id = null
@@ -37,6 +43,7 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
       const { group, head } = store.startToolGroup({ name: tool.name, arg: tool.arg, params: tool.params })
       entry = { group, head, outStarted: false }
       toolGroups.set(key, entry)
+      store.soloExpand(group.id) // 新组独占展开，前面的收起
     }
     return entry
   }
@@ -48,6 +55,7 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
         thinkingGroup.id = g.id
         live.thinking = store.stream('system', { group: g.id })
         live.answer = null
+        store.soloExpand(g.id) // 手风琴：新思考组独占展开
         setPhase('thinking')
       }
       live.thinking.push(delta)
@@ -83,6 +91,7 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
         live.thinking?.end()
         live.thinking = null
         collapseThinking()
+        store.soloExpand() // 正文流式输出时没有「当前组」，全部收起
         store.blank()
         live.answer = store.stream('assistant')
         setPhase('answering')
@@ -96,6 +105,7 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
     live.answer?.end()
     for (const t of toolGroups.values()) store.setToolStatus(t.head, 'ok')
     toolGroups.clear()
+    store.soloExpand() // 回合结束：think / tool 全部收起
     if (aborted) store.addNote('⎿ 已中断 · 本轮输出到此为止')
   }
 
