@@ -1,21 +1,33 @@
 /**
- * 一轮对话的事件映射：把会话层吐出的增量（思考/工具/正文）落到转写分组里。
+ * 一轮对话的事件映射：把会话层吐出的增量（思考/工具/正文）落到转写分组里，
+ * 同时交给记录器攒成「按行」的结构（供持久化，见 core/session/recorder.ts）。
  *
  * 从 App.ts 抽出来是因为这块状态最多（当前思考流、当前正文流、并发工具的组表），
  * 而且它只依赖 store 与「设置阶段」这个回调，跟渲染无关。
  */
 import type { AgentSession, ToolStep, TurnSink } from '../agent/session.ts'
 import type { Group, LineStream, ToolEntry, TranscriptStore } from '../core/transcript/index.ts'
+import { createTurnRecorder, type StoredTurn } from '../core/session/index.ts'
 
 export type Phase = 'idle' | 'thinking' | 'tool' | 'answering'
 
 export type TurnSinkHandle = Readonly<{
   sink: TurnSink
-  /** 一轮收尾：结束还在流的行、把没结的工具标 ok、被中断则写一行提示。 */
-  finish(aborted: boolean): void
+  /** 一轮开始时调用：让记录器知道这一轮的用户输入是什么 */
+  beginTurn(prompt: string): void
+  /**
+   * 一轮收尾：结束还在流的行、把没结的工具标 ok、被中断则写一行提示，
+   * 最后把这一轮交给 onTurnEnd（落盘挂在那里）。
+   */
+  finish(aborted: boolean, agentState?: unknown): void
 }>
 
-export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) => void): TurnSinkHandle {
+export function createTurnSink(
+  store: TranscriptStore,
+  setPhase: (phase: Phase) => void,
+  hooks: { onTurnEnd?: (turn: StoredTurn) => void } = {},
+): TurnSinkHandle {
+  const recorder = createTurnRecorder()
   // 放在容器里：这几个值只在回调里被赋值，局部 let 会被 TS 收窄成 null。
   const live: { thinking: LineStream | null; answer: LineStream | null } = { thinking: null, answer: null }
   // 工具分组按 toolCallId 建键：一个 step 里并发多个工具调用也不会串行错位
@@ -58,14 +70,17 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
         store.soloExpand(g.id) // 手风琴：新思考组独占展开
         setPhase('thinking')
       }
+      recorder.thinkingDelta(delta)
       live.thinking.push(delta)
     },
     thinkingEnd() {
+      recorder.thinkingEnd()
       live.thinking?.end()
       live.thinking = null
       collapseThinking()
     },
     toolStart(tool: ToolStep) {
+      recorder.toolStart(tool)
       live.thinking?.end()
       live.thinking = null
       collapseThinking()
@@ -74,6 +89,7 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
       setPhase('tool')
     },
     toolLine(tool: ToolStep, line: string) {
+      recorder.toolLine(tool, line)
       const t = ensureTool(tool)
       if (!t.outStarted) {
         store.groupSection(t.group.id, 'out')
@@ -82,6 +98,7 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
       store.groupBody(t.group.id, line)
     },
     toolEnd(tool: ToolStep, status) {
+      recorder.toolEnd(tool, status)
       store.setToolStatus(ensureTool(tool).head, status)
       toolGroups.delete(keyOf(tool))
       setPhase('thinking')
@@ -96,18 +113,20 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
         live.answer = store.stream('assistant')
         setPhase('answering')
       }
+      recorder.answerDelta(delta)
       live.answer.push(delta)
     },
   }
 
-  const finish = (aborted: boolean): void => {
+  const finish = (aborted: boolean, agentState?: unknown): void => {
     live.thinking?.end()
     live.answer?.end()
     for (const t of toolGroups.values()) store.setToolStatus(t.head, 'ok')
     toolGroups.clear()
     store.soloExpand() // 回合结束：think / tool 全部收起
     if (aborted) store.addNote('⎿ 已中断 · 本轮输出到此为止')
+    hooks.onTurnEnd?.(recorder.finish(aborted, agentState))
   }
 
-  return { sink, finish }
+  return { sink, beginTurn: (prompt: string) => recorder.begin(prompt), finish }
 }

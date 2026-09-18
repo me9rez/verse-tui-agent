@@ -10,7 +10,10 @@
  *   4. Esc 真的能中断一轮
  * 失败时以非 0 退出，可直接进 CI。
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { listSessions, loadSession } from '../core/session/index.ts'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
@@ -18,6 +21,9 @@ import { loadDotEnv } from '../core/env.ts'
 
 // .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
 loadDotEnv()
+
+// 会话落盘断言会真的写文件，所以把会话目录指到临时目录——绝不往仓库的 .verse-sessions/ 里写测试数据。
+process.env.VT_SESSION_DIR = mkdtempSync(join(tmpdir(), 'verse-smoke-'))
 
 
 const COLS = 100
@@ -259,6 +265,31 @@ check(
   'Esc 能中断一轮',
   api.store.rowCount() > rowsAtLongStart && /已中断/.test(afterInterrupt),
   `这一轮从 ${rowsAtLongStart} 行涨到 ${api.store.rowCount()} 行（清空前是 ${rowsBeforeLong} 行）；屏上出现中断提示=${/已中断/.test(afterInterrupt)}`,
+)
+
+check(
+  '一轮结束后会话落盘（含用户输入与正文）',
+  (() => {
+    const one = listSessions()[0]
+    return Boolean(one && one.turns.length >= 1 && one.turns[0]?.user === PROMPT_1 && one.turns[0].answer.length > 0)
+  })(),
+  (() => {
+    const one = listSessions()[0]
+    return `sessions=${listSessions().length} turns=${one?.turns.length ?? 0} user=${JSON.stringify(one?.turns[0]?.user ?? '')} 正文行=${one?.turns[0]?.answer.length ?? 0}`
+  })(),
+)
+check(
+  '落盘的会话能被读回来（含工具与思考）',
+  (() => {
+    const id = listSessions()[0]?.id
+    const one = id ? loadSession(id) : null
+    return Boolean(one?.turns[0]?.tools.length && one.turns[0].thinking.length)
+  })(),
+  (() => {
+    const id = listSessions()[0]?.id ?? ''
+    const one = id ? loadSession(id) : null
+    return `id=${id} tools=${one?.turns[0]?.tools.length ?? 0} thinking=${one?.turns[0]?.thinking.length ?? 0}`
+  })(),
 )
 
 const failures = checks.filter((c) => !c.ok)

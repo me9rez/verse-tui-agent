@@ -25,7 +25,12 @@ const DEFAULT_SYSTEM = [
 export function createLiveSession(opts: LiveOptions): AgentSession {
   return {
     id: 'live',
+    kind: 'live',
     label: `live · ${opts.model}`,
+    // 裸 SSE 没有服务端上下文可恢复，恢复时只还原转写（见 README 的已知边界）
+    snapshot(): undefined {
+      return undefined
+    },
     async respond(prompt: string, ctx: TurnContext): Promise<void> {
       const controller = new AbortController()
       const watchdog = setInterval(() => {

@@ -29,6 +29,17 @@ import { describeProvider, dotEnvResult } from '../core/env.ts'
 import { styles } from '../core/theme.ts'
 import { APP_NAME, HEADER_LABEL } from '../core/brand.ts'
 import { formatDuration } from '../core/text.ts'
+import {
+  latestSession,
+  listSessions,
+  loadSession,
+  newSessionId,
+  replaySession,
+  saveSession,
+  titleFromPrompt,
+  type SessionKind,
+  type StoredSession,
+} from '../core/session/index.ts'
 
 export type { Phase } from './turn-sink.ts'
 
@@ -47,6 +58,10 @@ export type AppApi = {
   rowText(y: number): string
   screenText(): string[]
   state(): { phase: Phase; streaming: boolean; tokens: number; turns: number; tools: number; session: string }
+  /** 当前会话能否导出上下文（透传 AgentSession.snapshot，ai 路返回消息数组） */
+  sessionSnapshot(): unknown
+  /** 当前会话 id（未落盘时为 null） */
+  currentSessionId(): string | null
 }
 
 export const App = defineComponent({
@@ -56,6 +71,8 @@ export const App = defineComponent({
     /** 流式节奏倍数：1 = 演示速度，0 = 尽快跑完（smoke 用）。 */
     speed: { type: Number, default: 1 },
     autoPrompt: { type: String, default: '' },
+    /** 启动时恢复哪个会话：具体 id，或 'last'（最近更新过的那个）；空 = 开新会话 */
+    sessionId: { type: String, default: '' },
     onReady: { type: Function as PropType<(api: AppApi) => void>, default: undefined },
     onExit: { type: Function as PropType<() => void>, default: undefined },
   },
@@ -94,6 +111,57 @@ export const App = defineComponent({
     }
     const sessionRef = ref<AgentSession>(makeSession(props.sessionKind))
 
+    // ── 持久会话 ──────────────────────────────────────────────────────────
+    /** VT_NO_PERSIST=1 时完全不动磁盘（逃生门） */
+    const persist = process.env.VT_NO_PERSIST !== '1'
+    /** 当前会话的磁盘状态；用容器而不是 ref：它不是渲染数据，别引多余的响应式触发 */
+    const current: { session: StoredSession | null } = { session: null }
+
+    const providerInfo = (): { host?: string; model?: string } => ({
+      host: liveEnv.baseUrl ? new URL(liveEnv.baseUrl).host : undefined,
+      model: liveEnv.model || undefined,
+    })
+
+    function startSession(kind: SessionKind, title = '新会话'): StoredSession {
+      const now = new Date().toISOString()
+      current.session = {
+        v: 1,
+        id: newSessionId(),
+        title,
+        kind,
+        provider: providerInfo(),
+        createdAt: now,
+        updatedAt: now,
+        turns: [],
+      }
+      return current.session
+    }
+
+    /** 切到某个会话：换会话实现 + 数据层重放 + 恢复模型上下文（agentState） */
+    function openSession(target: StoredSession): void {
+      current.session = target
+      sessionRef.value = makeSession(target.kind)
+      replaySession(target, store)
+      sessionRef.value.restore?.(target.turns.at(-1)?.agentState)
+      turn.value = target.turns.length
+      scheduler.invalidate()
+    }
+
+    if (persist) {
+      const boot =
+        props.sessionId === 'last'
+          ? latestSession()
+          : props.sessionId
+            ? loadSession(props.sessionId)
+            : null
+      if (boot) {
+        openSession(boot)
+        store.addNote(`已恢复会话 ${boot.id} · ${boot.title}（${boot.turns.length} 轮）`)
+      } else {
+        startSession(props.sessionKind)
+      }
+    }
+
     let timer: ReturnType<typeof setInterval> | null = null
     const startTicker = () => {
       if (timer) return
@@ -123,9 +191,27 @@ export const App = defineComponent({
       ui.elapsedMs = 0
       startTicker()
 
-      const { sink, finish } = createTurnSink(store, (phase) => {
-        ui.phase = phase
-      })
+      const { sink, finish, beginTurn } = createTurnSink(
+        store,
+        (phase) => {
+          ui.phase = phase
+        },
+        {
+          onTurnEnd(turnRec) {
+            if (!persist) return
+            const session = current.session ?? startSession(sessionRef.value.kind)
+            session.turns.push(turnRec)
+            session.updatedAt = new Date().toISOString()
+            if (session.title === '新会话' && turnRec.user) session.title = titleFromPrompt(turnRec.user)
+            try {
+              saveSession(session)
+            } catch (err) {
+              store.addNote(`⚠ 会话落盘失败：${(err as Error).message}`)
+            }
+          },
+        },
+      )
+      beginTurn(prompt)
 
       const chunkDelayMs = props.speed <= 0 ? 0 : Math.max(1, Math.round(12 * props.speed))
       try {
@@ -137,7 +223,7 @@ export const App = defineComponent({
           sleep,
         })
       } finally {
-        finish(ui.aborted)
+        finish(ui.aborted, sessionRef.value.snapshot?.())
         ui.streaming = false
         ui.phase = 'idle'
         stopTicker()
@@ -162,7 +248,19 @@ export const App = defineComponent({
       if (!text) return
       if (text.startsWith('/')) {
         const cmd = text.split(/\s+/)[0]
-        if (cmd === '/help') store.addNote(HELP)
+        if (cmd === '/new' || cmd.startsWith('/new ')) {
+          const wanted = raw.trim().slice(4).trim()
+          if (!persist) {
+            store.addNote('落盘已关闭（VT_NO_PERSIST=1）：/new 只清空转写。')
+            store.clear()
+          } else {
+            startSession(sessionRef.value.kind, wanted || '新会话')
+            sessionRef.value = makeSession(sessionRef.value.kind)
+            store.clear()
+            turn.value = 0
+            store.addNote(`已新建会话 ${current.session?.id ?? ''}${wanted ? ` · ${wanted}` : ''}`)
+          }
+        } else if (cmd === '/help') store.addNote(HELP)
         else if (cmd === '/clear') {
           store.clear()
           store.addNote('转写已清空。')
@@ -301,6 +399,8 @@ export const App = defineComponent({
         tools: store.stats.value.tools,
         session: sessionRef.value.id,
       }),
+      sessionSnapshot: () => sessionRef.value.snapshot?.(),
+      currentSessionId: () => current.session?.id ?? null,
     }
 
     if (props.autoPrompt) setTimeout(() => api.submit(props.autoPrompt), 30)

@@ -116,7 +116,15 @@ export function createAiSdkSession(opts: AiSdkOptions): AgentSession {
 
   return {
     id: 'ai',
+    kind: 'ai',
     label: `ai-sdk · ${opts.model}`,
+    /** 多轮上下文就是 history（含 tool 消息）：原样存，恢复时原样塞回去 */
+    snapshot(): unknown {
+      return history
+    },
+    restore(state: unknown): void {
+      if (Array.isArray(state)) history.splice(0, history.length, ...state)
+    },
 
     async respond(prompt: string, ctx: TurnContext): Promise<void> {
       // 每一轮的工具集都闭包住 sink 和本轮的行键

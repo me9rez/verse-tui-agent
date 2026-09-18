@@ -199,7 +199,12 @@ function runCommand(cmd: RealCommand, onLine: (line: string) => void, shouldStop
 export function createMockSession(): AgentSession {
   return {
     id: 'mock',
+    kind: 'mock',
     label: 'mock 剧本',
+    // 本地剧本没有服务端上下文，恢复时只还原转写（见 README 的已知边界）
+    snapshot(): undefined {
+      return undefined
+    },
     async respond(prompt: string, ctx: TurnContext): Promise<void> {
       const steps = prompt.startsWith('/long') ? SCENARIO_LONG : SCENARIOS[(ctx.turn - 1) % SCENARIOS.length]!
       for (const step of steps) {

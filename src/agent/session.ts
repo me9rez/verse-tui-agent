@@ -44,9 +44,17 @@ export type TurnContext = {
   sleep: (ms: number) => Promise<void>
 }
 
+import type { SessionKind } from '../core/session/model.ts'
+
 export type AgentSession = {
   readonly id: string
   readonly label: string
+  /** 这条会话属于哪一路：决定落盘文件里的 kind，也决定 /new 切回哪一路 */
+  readonly kind: SessionKind
   /** 跑完一轮：把增量推给 sink。 */
   respond(prompt: string, ctx: TurnContext): Promise<void>
+  /** 把「与服务端上下文有关的状态」导出成可 JSON 化的值（没有就返回 undefined） */
+  snapshot?(): unknown
+  /** 从 snapshot() 的产物恢复；坏的输入要静默忽略（旧文件可能来自更早的版本） */
+  restore?(state: unknown): void
 }
