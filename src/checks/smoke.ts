@@ -1,7 +1,7 @@
 /**
  * 无头 smoke：不碰真终端，直接断言「内容真的进了终端 buffer」。
  *
- *   node src/smoke.ts
+ *   node src/checks/smoke.ts
  *
  * 断言的不是"函数被调用了"，而是四件实事：
  *   1. 流式是增量的（采样到的 version 持续增长，不是一次性写完）
@@ -149,7 +149,7 @@ check(
 )
 check(
   '工具输出是真实子进程',
-  storeText().includes('src/transcript.ts') && /合计 \d+ 个文件/.test(storeText()),
+  storeText().includes('src/core/transcript/store.ts') && /合计 \d+ 个文件/.test(storeText()),
   '含 Read 的真实源码行与行数统计（由子进程 stdout 流式读入）',
 )
 check('工具结果状态正确', firstState.tools >= 2, `统计到 ${firstState.tools} 个工具调用`)

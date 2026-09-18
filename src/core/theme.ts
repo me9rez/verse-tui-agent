@@ -2,7 +2,7 @@
  * 配色与样式 token。
  *
  * vue-tui 的 Style 只认 ANSI 名或 hex（渲染器负责降级到 ansi256/ansi16），
- * 所以这里统一用 hex，真彩终端最接近 Claude Code 的观感。
+ * 所以这里统一用 hex：真彩终端下观感最接近预期，降到 ansi256 也不糊。
  */
 import type { Style } from '@simon_he/vue-tui/core'
 

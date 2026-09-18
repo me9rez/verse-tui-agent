@@ -1,7 +1,7 @@
 /**
  * 真实 API 的端到端检查：走 SSE，把断言建立在实际收到的字节上。
  *
- *   VT_BASE_URL=https://.../v1 VT_MODEL=<model> VT_API_KEY=... node src/live-check.ts
+ *   VT_BASE_URL=https://.../v1 VT_MODEL=<model> VT_API_KEY=... node src/checks/live-check.ts
  *   （也可用 VT_PROMPT 换提问）
  *
  * 断言：

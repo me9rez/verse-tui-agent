@@ -1,7 +1,7 @@
 /**
  * AI SDK 工具 agent 的端到端检查：模型真的动手，检查也真的查文件系统。
  *
- *   VT_AGENT_ROOT=<sandbox> VT_BASE_URL=... VT_MODEL=... VT_API_KEY=... node src/agent-check.ts
+ *   VT_AGENT_ROOT=<sandbox> VT_BASE_URL=... VT_MODEL=... VT_API_KEY=... node src/checks/agent-check.ts
  *
  * 断言不只是"界面显示了工具行"，而是：
  *   1. 工具行确实出现在转写里（write_file / read_file / bash）

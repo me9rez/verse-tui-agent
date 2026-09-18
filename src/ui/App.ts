@@ -1,5 +1,5 @@
 /**
- * Claude Code 风格 TUI（vue-tui 渲染）。
+ * Verse 的界面装配：终端流式 agent 的 TUI（vue-tui 渲染）。
  *
  * 版面（全屏 + alternate screen，坐标都是绝对单元格坐标）：
  *   y=0            顶栏（品牌 + 会话/模型）
@@ -27,6 +27,7 @@ import { createAiSdkSession } from '../agent/aiSdkSession.ts'
 import type { AgentSession } from '../agent/session.ts'
 import { describeProvider, dotEnvResult } from '../core/env.ts'
 import { styles } from '../core/theme.ts'
+import { APP_NAME, HEADER_LABEL } from '../core/brand.ts'
 import { formatDuration } from '../core/text.ts'
 
 export type { Phase } from './turn-sink.ts'
@@ -49,7 +50,7 @@ export type AppApi = {
 }
 
 export const App = defineComponent({
-  name: 'ClaudeCodeDemo',
+  name: 'VerseApp',
   props: {
     sessionKind: { type: String as PropType<'mock' | 'live'>, default: 'mock' },
     /** 流式节奏倍数：1 = 演示速度，0 = 尽快跑完（smoke 用）。 */
@@ -311,7 +312,7 @@ export const App = defineComponent({
       // 关键：在分支之前先读一次 version，让整个渲染函数成为它的依赖。
       // 否则「空态」那一支不读任何响应式值，视图永远不会被唤醒去渲染正文。
       const version = store.version.value
-      const header = fitLine(cols, '✻ Claude Code · vue-tui demo', sessionRef.value.label)
+      const header = fitLine(cols, HEADER_LABEL, sessionRef.value.label)
       const empty = store.rowCount() === 0
 
       return h(TView, { x: 0, y: 0, w: cols, h: size.value.rows, onKeydownCapture: onKey }, () => [
@@ -329,7 +330,7 @@ export const App = defineComponent({
                   wrap: true,
                   style: styles.toolSummary,
                   value: [
-                    '用 vue-tui 搭的 Claude Code 风格终端界面 demo。',
+                    `${APP_NAME} · 用 vue-tui 搭的终端流式 agent demo。`,
                     '',
                     '输入一句话回车，就能看到完整链路：思考流 → 真实执行的工具调用 → 增量 markdown 正文。',
                     '',

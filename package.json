@@ -1,8 +1,8 @@
 {
-  "name": "vue-tui-demo",
+  "name": "verse-tui-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "Claude Code 风格的终端界面 demo（@simon_he/vue-tui），支持流式输出",
+  "description": "Verse · 用 @simon_he/vue-tui 搭的终端流式 agent demo（思考/工具块可折叠）",
   "type": "module",
   "packageManager": "pnpm@12.4.2",
   "scripts": {

@@ -1,6 +1,9 @@
-# vue-tui-demo · Claude Code 风格终端界面
+# Verse · 终端流式 agent（Vue 3 + @simon_he/vue-tui）
 
-用 [`@simon_he/vue-tui`](https://vue-tui.pages.dev/)（Vue 3 的 terminal UI 组件库）搭的 Claude Code 风格 TUI，重点是**流式输出**：思考流 → 真实执行的工具调用 → 逐行增量渲染的 markdown 正文。
+用 [`@simon_he/vue-tui`](https://vue-tui.pages.dev/)（Vue 3 的 terminal UI 组件库）搭的终端 agent demo，重点是**流式输出**：思考流 → 真实执行的工具调用 → 逐行增量渲染的 markdown 正文。
+
+交互排版参考了 Claude Code 的转写形式（思考块 / 工具调用 / 可折叠分组），
+组件、渲染、会话层与 AI SDK 工具循环都是本项目自己的实现。
 
 ![demo](.artifacts/demo.png)
 
@@ -118,7 +121,7 @@ agent 工作区  C:\workspace\vue-tui-demo\.agent-sandbox
     ...
 ```
 
-思考组在**回答开始时会自动收起**（跟 Claude Code 一样），点一下标题或 `Ctrl+T` 随时展开；一轮结束后工具组保持展开，方便看输出。
+思考组在**回答开始时会自动收起**（参考答案的默认行为），点一下标题或 `Ctrl+T` 随时展开；一轮结束后工具组保持展开，方便看输出。
 
 ## AI SDK 工具 agent（形状参照 pi）
 

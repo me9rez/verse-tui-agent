@@ -2,6 +2,8 @@
  * 把终端 buffer 的行/格子转成带颜色的 HTML（供浏览器打开或 headless 截图）。
  * shot.ts 与 live-check.ts 共用，避免两份实现漂移。
  */
+import { APP_ID, HEADER_LABEL } from './brand.ts'
+
 export type CellLike = { ch?: string; style?: Record<string, unknown> }
 
 /** ANSI 颜色名 → hex（core 的 Style 里 fg/bg 允许用 ANSI 名）。 */
@@ -73,9 +75,9 @@ export function rowsToHtml(
     })
     .join('\n')
 
-  const caption = opts.caption ?? `vue-tui demo · ${opts.cols}×${rows.length} cells`
+  const caption = opts.caption ?? `${HEADER_LABEL} · ${opts.cols}×${rows.length} cells`
   return `<!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><title>${opts.title ?? 'vue-tui demo'}</title>
+<html lang="zh"><head><meta charset="utf-8"><title>${opts.title ?? APP_ID}</title>
 <style>
   html,body{margin:0;background:#0f0f12}
   .frame{padding:18px 22px}

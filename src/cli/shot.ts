@@ -1,10 +1,10 @@
 /**
  * 出图快照：把 demo 跑完后的终端 buffer 转成带颜色的 HTML，供截图/归档。
  *
- *   node src/shot.ts                       # 默认 110x32，mock 剧本
- *   VT_SHOT_ROWS=64 node src/shot.ts       # 更高视口，一轮内容全装下
- *   VT_SHOT_PROMPT=/long node src/shot.ts
- *   VT_LIVE=1 VT_BASE_URL=... VT_MODEL=... node src/shot.ts   # 用真实 API 出图
+ *   node src/cli/shot.ts                   # 默认 110x32，mock 剧本
+ *   VT_SHOT_ROWS=64 node src/cli/shot.ts   # 更高视口，一轮内容全装下
+ *   VT_SHOT_PROMPT=/long node src/cli/shot.ts
+ *   VT_LIVE=1 VT_BASE_URL=... VT_MODEL=... node src/cli/shot.ts   # 用真实 API 出图
  *
  * 产物：.artifacts/demo.html + .artifacts/demo-screen.txt
  * 截图：chrome --headless=new --screenshot=demo.png file://.../demo.html
@@ -12,6 +12,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
+import { HEADER_LABEL } from '../core/brand.ts'
 import { styles } from '../core/theme.ts'
 import { rowsToHtml, type CellLike } from '../core/html.ts'
 import { loadDotEnv } from '../core/env.ts'
@@ -88,8 +89,8 @@ console.log('cell 结构示例:', JSON.stringify(probe))
 
 mkdirSync('.artifacts', { recursive: true })
 const caption = live
-  ? `vue-tui demo · live ${process.env.VT_MODEL ?? ''} @ ${process.env.VT_BASE_URL ?? ''}`
-  : `vue-tui demo · ${COLS}×${ROWS} cells · 流式输出完成后的终端 buffer（行数/颜色取自 core buffer，非模拟）`
+  ? `${HEADER_LABEL} · live ${process.env.VT_MODEL ?? ''} @ ${process.env.VT_BASE_URL ?? ''}`
+  : `${HEADER_LABEL} · ${COLS}×${ROWS} cells · 流式输出完成后的终端 buffer（行数/颜色取自 core buffer，非模拟）`
 writeFileSync('.artifacts/demo.html', rowsToHtml(rows, { cols: COLS, caption }), 'utf8')
 writeFileSync(
   '.artifacts/demo-screen.txt',

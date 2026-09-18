@@ -44,11 +44,11 @@ const SCENARIO_STREAM: StreamStep[] = [
     kind: 'tool',
     tool: {
       name: 'Read',
-      arg: 'src/transcript.ts',
-      params: { path: 'src/transcript.ts', offset: 172, limit: 12 },
+      arg: 'src/core/transcript/store.ts',
+      params: { path: 'src/core/transcript/store.ts', offset: 96, limit: 14 },
       output: [],
       status: 'ok',
-      run: readFileLines('src/transcript.ts', 172, 12),
+      run: readFileLines('src/core/transcript/store.ts', 96, 14),
     },
   },
   {
@@ -65,7 +65,7 @@ const SCENARIO_STREAM: StreamStep[] = [
   },
   {
     kind: 'answer',
-    text: `流式输出的关键就三步，都在 \`src/transcript.ts\` 里：
+    text: `流式输出的关键就三步，都在 \`src/core/transcript/store.ts\` 里：
 
 1. **会话层产出增量** —— mock 剧本按 2~3 个字符一块吐，\`chunkText()\` 保证不把换行切碎。
 2. **数据源按行累积** —— \`LineStream.push(delta)\` 每遇到一个换行符就「封行 + 开新行」，只改当前行的 \`text\` 并把这一行的 \`rev++\`。
@@ -85,7 +85,7 @@ push(delta: string) {
 }
 \`\`\`
 
-配合 \`autoStickToBottom\`，只要用户没往上滚，新内容就会顶在底部；一旦用户滚上去，视图就不再抢滚动位置——这也是 Claude Code 里"看历史时输出不会把你拽下来"的那套行为。
+配合 \`autoStickToBottom\`，只要用户没往上滚，新内容就会顶在底部；一旦用户滚上去，视图就不再抢滚动位置——「看历史时输出不会把你拽下来」是终端 agent 的通行做法。
 
 > 提示：本段文本来自本地剧本，不是真实模型输出；设 \`VT_LIVE=1\` 可以换成真实端点的 SSE 流。`,
   },
@@ -98,7 +98,7 @@ const SCENARIO_LAYOUT: StreamStep[] = [
   },
   {
     kind: 'answer',
-    text: `这套 demo 的分层是这样切的（\`src/App.ts\` 的 \`LAYOUT\`）：
+    text: `这套 demo 的分层是这样切的（\`src/ui/layout.ts\` 的 \`layoutOf()\`）：
 
 | 区域 | plane | 更新频率 |
 | --- | --- | --- |

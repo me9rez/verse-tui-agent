@@ -1,6 +1,6 @@
 /**
  * 排版探针：把转写行按 JSON 打出来（含前导空格数），用来看块间空行与缩进是否到位。
- *   node src/probe-layout.ts
+ *   node src/probes/layout.ts
  */
 import { loadDotEnv } from '../core/env.ts'
 loadDotEnv()

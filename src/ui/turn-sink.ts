@@ -24,7 +24,7 @@ export function createTurnSink(store: TranscriptStore, setPhase: (phase: Phase) 
   const keyOf = (tool: ToolStep): string => tool.id ?? `${tool.name}::${tool.arg}`
   const thinkingGroup: { id: string | null } = { id: null }
 
-  /** 思考说完就自动收起（Claude Code 的行为）；点标题可再展开 */
+  /** 思考说完就自动收起（参考答案的默认行为）；点标题可再展开 */
   const collapseThinking = (): void => {
     if (thinkingGroup.id) store.setGroupCollapsed(thinkingGroup.id, true)
     thinkingGroup.id = null
