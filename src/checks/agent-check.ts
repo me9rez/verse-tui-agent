@@ -192,7 +192,12 @@ check('产生了多帧提交', commits > 20, `commit 次数 ${commits}`)
 check('正文画到了屏幕上', screenText.trim().length > 0 && /\S/.test(screenText), `屏幕 ${screen.filter((l) => l.trim()).length} 行非空`)
 
 // 5. 无错误
-check('没有 SDK / 网络错误', !/\[SDK 错误\]|\[流中断\]|\[请求失败\]/.test(storeText), '转写里没有错误标记')
+const errorHits = storeText.match(/\[[^\]]*(?:SDK 错误|流中断|请求失败)[^\]]*\][^\n]*/g)
+check(
+  '没有 SDK / 网络错误',
+  !errorHits,
+  errorHits ? `转写里出现：${errorHits[0].slice(0, 160)}` : '转写里没有错误标记',
+)
 
 clearTimeout(hardStop)
 // ── 折叠 / 参数：真实工具调用的 params 与折叠往返 ───────────────────

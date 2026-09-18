@@ -121,6 +121,9 @@ agent 工作区  C:\workspace\vue-tui-demo\.agent-sandbox
     ...
 ```
 
+> `pnpm live` / `pnpm agent` 会真的打端点：连续背靠背跑会撞上游 RPM 限制（实测 10 RPM/请求数），
+> 报 `AI_APICallError: request limited RPM reached` 时等一分钟再单跑一次即可，不是代码问题。
+
 思考组在**回答开始时会自动收起**（参考答案的默认行为），点一下标题或 `Ctrl+T` 随时展开；一轮结束后工具组保持展开，方便看输出。
 
 ## AI SDK 工具 agent（形状参照 pi）
