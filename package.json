@@ -13,7 +13,7 @@
     "agent": "node src/checks/agent-check.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.51",
     "@simon_he/vue-tui": "^1.1.9",

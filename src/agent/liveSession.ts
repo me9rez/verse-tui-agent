@@ -2,7 +2,7 @@
  * 真实模型流：任何 OpenAI 兼容端点（含本机 llama-server / 各种网关）的 SSE。
  *
  * 启用方式：
- *   VT_LIVE=1 VT_BASE_URL=http://127.0.0.1:8081/v1 VT_MODEL=<model> [VT_API_KEY=...] node src/terminal.ts
+ *   VT_LIVE=1 VT_BASE_URL=https://<endpoint>/v1 VT_MODEL=<model> [VT_API_KEY=...] pnpm dev
  *
  * 说明：这一路只做纯文本流（content + reasoning_content），不带工具调用——
  * demo 里工具那层是本地剧本演的，避免假装模型真的能执行命令。

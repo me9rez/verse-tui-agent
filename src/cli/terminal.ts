@@ -1,8 +1,8 @@
 /**
  * 交互式入口：真终端 + alternate screen。
  *
- *   node src/terminal.ts                             # 本地剧本（离线）
- *   VT_LIVE=1 VT_BASE_URL=http://127.0.0.1:8081/v1 VT_MODEL=<model> node src/terminal.ts
+ *   pnpm dev                             # 本地剧本（离线）
+ *   VT_LIVE=1 VT_BASE_URL=https://<endpoint>/v1 VT_MODEL=<model> pnpm dev
  *
  * 环境变量：
  *   VT_SPEED=2   流式节奏倍数（1 默认，0.3 更快）
