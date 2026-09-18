@@ -141,6 +141,27 @@ agent 工作区  <repo>/.agent-sandbox
 > `pnpm live` / `pnpm agent` 会真的打端点：背靠背连续跑会撞上游 RPM 限流（实测免费档 10 RPM），
 > 报 `AI_APICallError: request limited RPM reached` 时等一分钟再单跑一次即可，不是代码问题。
 
+### 颜色：真彩 / 256 / 16 / 8 四级
+
+配色统一用 hex 写在 `src/core/theme.ts`，渲染器按终端能力自动降级。下面是同一份 palette 在四种色深下**真实写出的字节**（`src/probes/color.ts` 抓的 stdout 渲染器原始输出，不是照文档抄的）：
+
+| 模式 | 前景转义形式 | accent `#d97757` 实际写成 |
+| --- | --- | --- |
+| `truecolor` | `ESC[38;2;R;G;Bm` | `38;2;217;119;87` |
+| `ansi256` | `ESC[38;5;Nm` | `38;5;173` |
+| `ansi16` | `ESC[3xm` / `ESC[9xm` | `91m` |
+| `ansi8` | `ESC[3xm` | `31m` |
+
+粗体 / 斜体 / 反显（`ESC[1m` `ESC[3m` `ESC[7m`）在四种模式下都照常输出。
+
+自动探测的顺序：`COLORTERM` 含 `truecolor`/`24bit` → `TERM_PROGRAM` 是 VS Code / WezTerm / Alacritty / Ghostty / Kitty / iTerm / Windows Terminal / Tabby / Hyper / Rio / Contour → Windows 下的 `WT_SESSION` 一类变量 → 回落看 `TERM` 里的 `256color` / `color` / `dumb`。输出不是 TTY 时直接按真彩走。可用 `VUE_TUI_COLOR_MODE=truecolor|ansi256|ansi16|ansi8` 强制指定（旧名 `DIMCODE_COLOR_MODE`）。
+
+```bash
+VUE_TUI_COLOR_MODE=ansi16 node src/probes/color.ts   # 按转义形式分类计数
+```
+
+> 缺口：库**不认 `NO_COLOR`**（43 个 dist 文件里一次都没出现），也没有单色档——`parseColorMode` 只认上面四个值。要彻底去色只能在终端侧做。
+
 ## 架构
 
 ```
