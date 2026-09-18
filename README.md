@@ -5,7 +5,6 @@
 
 ![Verse](docs/demo.png)
 
-![CI](https://github.com/me9rez/verse-tui-agent/actions/workflows/ci.yml/badge.svg)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![node](https://img.shields.io/badge/node-%E2%89%A5%2022.18-brightgreen)
 
