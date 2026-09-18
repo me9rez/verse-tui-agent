@@ -21,6 +21,11 @@ jobs:
           cache: pnpm
 
       - name: Install
+        # pnpm 的「新发布包」年龄门（minimumReleaseAge）会拒绝发布不足 24h 的版本
+        # （本仓库就被 vue@3.5.43 卡过一次）。CI 装的是已提交、已审过的 lockfile，
+        # 不是刚解析出来的新版本，所以在这里显式关掉这道门。
+        env:
+          npm_config_minimum_release_age: '0'
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
