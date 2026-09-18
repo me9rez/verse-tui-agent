@@ -1,0 +1,511 @@
+/**
+ * Claude Code 风格 TUI（vue-tui 渲染）。
+ *
+ * 版面（全屏 + alternate screen，坐标都是绝对单元格坐标）：
+ *   y=0            顶栏（品牌 + 会话/模型）
+ *   y=1..statusY-1 转写正文（transcript plane：流式增量只重绘这里）
+ *   y=statusY      状态栏（chrome plane）
+ *   y=inputY..+2   输入框（default plane，3 行含边框）
+ *   y=hintY        快捷键提示
+ *
+ * 流式输出的落点全在 TranscriptStore：每次增量只改一行 + 自增 version，
+ * <TTranscriptView> 比对每行 getRowVersion 后只重绘脏行。
+ */
+import { appendFileSync } from 'node:fs'
+import { computed, defineComponent, h, onBeforeUnmount, reactive, ref, type PropType } from 'vue'
+import { TText, TView } from '@simon_he/vue-tui'
+import { TTranscriptView, TRenderPlane } from '@simon_he/vue-tui/agent'
+import { TInputBox, useTerminal } from '@simon_he/vue-tui/vue'
+import type { TerminalKeyboardEvent } from '@simon_he/vue-tui/runtime'
+import { createTranscriptStore, type Group, type LineStream, type ToolEntry, type TranscriptStore } from './transcript.ts'
+import { createMockSession } from './agent/mockSession.ts'
+import { createLiveSession } from './agent/liveSession.ts'
+import { createAiSdkSession } from './agent/aiSdkSession.ts'
+import type { AgentSession, ToolStep, TurnSink } from './agent/session.ts'
+import { describeProvider, dotEnvResult } from './env.ts'
+import { styles } from './theme.ts'
+import { cellWidth, formatDuration, padTo } from './text.ts'
+
+export type Phase = 'idle' | 'thinking' | 'tool' | 'answering'
+
+export type AppApi = {
+  submit(text: string): void
+  interrupt(): void
+  whenIdle(): Promise<void>
+  store: TranscriptStore
+  /** 全部折叠/展开，返回切换后的状态（true = 现已全部折叠） */
+  toggleAll(): boolean
+  /** 折叠/展开最近一个分组，返回组 id */
+  toggleLast(): string | null
+  /** 分组摘要（不含内容），供无头断言 */
+  groups(): Array<{ id: string; kind: string; collapsed: boolean; lines: number }>
+  /** 直接读终端 buffer 的行文本——smoke 用它断言「内容真的画到屏幕上了」。 */
+  rowText(y: number): string
+  screenText(): string[]
+  state(): { phase: Phase; streaming: boolean; tokens: number; turns: number; tools: number; session: string }
+}
+
+function layoutOf(rows: number) {
+  const hintY = Math.max(8, rows - 1)
+  const inputY = hintY - 3
+  const statusY = inputY - 1
+  const transcriptY = 1
+  return {
+    headerY: 0,
+    transcriptY,
+    transcriptH: Math.max(3, statusY - transcriptY),
+    statusY,
+    inputY,
+    hintY,
+  }
+}
+
+const HELP = [
+  '可用命令：',
+  '  /help    显示这份说明',
+  '  /clear   清空转写',
+  '  /long    跑一段长回答（演示滚动与自动贴底）',
+  '  /live    切到真实模型流（需要 VT_BASE_URL / VT_MODEL）',
+  '  /ai      切到 AI SDK 工具 agent（read/write/edit/bash/ls）',
+  '  /env     看当前 provider 配置（不回显密钥）',
+  '  /mock    切回本地剧本',
+  '  /fold    折叠/展开全部（同一个 Ctrl+O）',
+  '  /exit    退出',
+].join('\n')
+
+const NL = String.fromCharCode(10)
+
+/** 去掉 C0/C1 控制字符，保留 tab 与换行；终端里注入的键序列常带这些标记。 */
+function stripControlChars(value: string): string {
+  return [...value]
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0
+      return code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127)
+    })
+    .join('')
+}
+
+const HINT = 'Enter 发送 · Esc 中断 · 点标题或 Ctrl+T 折叠最近一组 · Ctrl+O 全部折叠/展开 · /help · Ctrl+C 退出'
+
+export const App = defineComponent({
+  name: 'ClaudeCodeDemo',
+  props: {
+    sessionKind: { type: String as PropType<'mock' | 'live'>, default: 'mock' },
+    /** 流式节奏倍数：1 = 演示速度，0 = 尽快跑完（smoke 用）。 */
+    speed: { type: Number, default: 1 },
+    autoPrompt: { type: String, default: '' },
+    onReady: { type: Function as PropType<(api: AppApi) => void>, default: undefined },
+    onExit: { type: Function as PropType<() => void>, default: undefined },
+  },
+  setup(props) {
+    const { terminal, scheduler } = useTerminal()
+    const size = ref(terminal.size())
+    const offResize = terminal.on('resize', () => {
+      size.value = terminal.size()
+      scheduler.invalidate()
+    })
+    onBeforeUnmount(offResize)
+
+    const store = createTranscriptStore()
+    const input = ref('')
+    /** 每次提交后自增，用来换掉输入框实例（清空它的内部文本）。 */
+    const composerKey = ref(0)
+    const transcriptRef = ref<{ scrollToBottom?: () => void } | null>(null)
+    const ui = reactive({ phase: 'idle' as Phase, streaming: false, aborted: false, startedAt: 0, elapsedMs: 0 })
+    const turn = ref(0)
+    const waiters: Array<() => void> = []
+
+    const liveEnv = {
+      baseUrl: process.env.VT_BASE_URL ?? '',
+      model: process.env.VT_MODEL ?? '',
+      apiKey: process.env.VT_API_KEY,
+    }
+    const canGoLive = Boolean(liveEnv.baseUrl && liveEnv.model)
+    /** 三种会话：mock 剧本 / 裸 SSE / AI SDK 工具 agent（形状参照 pi） */
+    const makeSession = (kind: string): AgentSession => {
+      if (!canGoLive) return createMockSession()
+      if (kind === 'ai') {
+        return createAiSdkSession({ ...liveEnv, root: process.env.VT_AGENT_ROOT ?? process.cwd() })
+      }
+      if (kind === 'live') return createLiveSession(liveEnv)
+      return createMockSession()
+    }
+    const sessionRef = ref<AgentSession>(makeSession(props.sessionKind))
+
+    let timer: ReturnType<typeof setInterval> | null = null
+    const startTicker = () => {
+      if (timer) return
+      timer = setInterval(() => {
+        if (ui.streaming) ui.elapsedMs = Date.now() - ui.startedAt
+      }, 200)
+    }
+    const stopTicker = () => {
+      if (timer) {
+        clearInterval(timer)
+        timer = null
+      }
+    }
+    onBeforeUnmount(stopTicker)
+
+    const sleep = (ms: number) => (ms <= 0 ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, ms)))
+
+    /** 一轮对话：会话产出增量 → 写进 store → 视图按 version 增量重绘。 */
+    async function runTurn(prompt: string): Promise<void> {
+      if (ui.streaming) return
+      store.addUser(prompt)
+      turn.value += 1
+      ui.streaming = true
+      ui.aborted = false
+      ui.phase = 'thinking'
+      ui.startedAt = Date.now()
+      ui.elapsedMs = 0
+      startTicker()
+
+      // 放在容器里：这几个值只在 sink 回调里被赋值，局部 let 会被 TS 收窄成 null。
+      const live: { thinking: LineStream | null; answer: LineStream | null } = {
+        thinking: null,
+        answer: null,
+      }
+      // 工具分组按 toolCallId 建键：一个 step 里并发多个工具调用也不会串行错位
+      type ToolLive = { group: Group; head: ToolEntry; outStarted: boolean }
+      const toolGroups = new Map<string, ToolLive>()
+      const keyOf = (tool: ToolStep): string => tool.id ?? `${tool.name}::${tool.arg}`
+      const thinkingGroup: { id: string | null } = { id: null }
+
+      /** 思考说完就自动收起（Claude Code 的行为）；点标题可再展开 */
+      const collapseThinking = () => {
+        if (thinkingGroup.id) store.setGroupCollapsed(thinkingGroup.id, true)
+        thinkingGroup.id = null
+      }
+      const ensureTool = (tool: ToolStep): ToolLive => {
+        const key = keyOf(tool)
+        let live = toolGroups.get(key)
+        if (!live) {
+          // 参数在开组时就作为组内前几行进表，展开即可见
+          const { group, head } = store.startToolGroup({ name: tool.name, arg: tool.arg, params: tool.params })
+          live = { group, head, outStarted: false }
+          toolGroups.set(key, live)
+        }
+        return live
+      }
+
+      const sink: TurnSink = {
+        thinkingDelta(delta) {
+          if (!live.thinking) {
+            const g = store.startThinkingGroup()
+            thinkingGroup.id = g.id
+            live.thinking = store.stream('system', { group: g.id })
+            live.answer = null
+            ui.phase = 'thinking'
+          }
+          live.thinking.push(delta)
+        },
+        thinkingEnd() {
+          live.thinking?.end()
+          live.thinking = null
+          collapseThinking()
+        },
+        toolStart(tool: ToolStep) {
+          live.thinking?.end()
+          live.thinking = null
+          collapseThinking()
+          live.answer = null
+          ensureTool(tool)
+          ui.phase = 'tool'
+        },
+        toolLine(tool: ToolStep, line: string) {
+          const t = ensureTool(tool)
+          if (!t.outStarted) {
+            store.groupSection(t.group.id, 'out')
+            t.outStarted = true
+          }
+          store.groupBody(t.group.id, line)
+        },
+        toolEnd(tool: ToolStep, status) {
+          store.setToolStatus(ensureTool(tool).head, status)
+          toolGroups.delete(keyOf(tool))
+          ui.phase = 'thinking'
+        },
+        answerDelta(delta) {
+          if (!live.answer) {
+            live.thinking?.end()
+            live.thinking = null
+            collapseThinking()
+            store.blank()
+            live.answer = store.stream('assistant')
+            ui.phase = 'answering'
+          }
+          live.answer.push(delta)
+        },
+      }
+
+      const chunkDelayMs = props.speed <= 0 ? 0 : Math.max(1, Math.round(12 * props.speed))
+      try {
+        await sessionRef.value.respond(prompt, {
+          sink,
+          aborted: () => ui.aborted,
+          chunkDelayMs,
+          turn: turn.value,
+          sleep,
+        })
+      } finally {
+        live.thinking?.end()
+        live.answer?.end()
+        for (const t of toolGroups.values()) store.setToolStatus(t.head, 'ok')
+        toolGroups.clear()
+        if (ui.aborted) store.addNote('⎿ 已中断 · 本轮输出到此为止')
+        ui.streaming = false
+        ui.phase = 'idle'
+        stopTicker()
+        scheduler.invalidate()
+        const pending = waiters.splice(0)
+        for (const resolve of pending) resolve()
+      }
+    }
+
+    async function handleSubmit(raw: string): Promise<void> {
+      // 去掉控制字符（终端注入的键序列可能带 bracketed-paste / 残余 CR 标记）
+      const cleaned = stripControlChars(raw)
+      if (process.env.VT_DEBUG_INPUT === '1') {
+        // 排查输入层问题时用：把原始文本按 JSON 记下来（含不可见字符）
+        try {
+          appendFileSync('.artifacts/input-debug.log', JSON.stringify({ raw, cleaned }) + NL, 'utf8')
+        } catch {
+          /* 调试用，失败无所谓 */
+        }
+      }
+      const text = cleaned.trim()
+      if (!text) return
+      if (text.startsWith('/')) {
+        const cmd = text.split(/\s+/)[0]
+        if (cmd === '/help') store.addNote(HELP)
+        else if (cmd === '/clear') {
+          store.clear()
+          store.addNote('转写已清空。')
+        } else if (cmd === '/exit') props.onExit?.()
+        else if (cmd === '/mock') {
+          sessionRef.value = createMockSession()
+          store.addNote('已切回本地剧本。')
+        } else if (cmd === '/live') {
+          if (!canGoLive) {
+            store.addNote('未配置真实端点。用 VT_BASE_URL=<.../v1> VT_MODEL=<model> 重启，或按 /help 看用法。')
+          } else {
+            sessionRef.value = createLiveSession(liveEnv)
+            store.addNote(`已切到真实模型流：${liveEnv.model}`)
+          }
+        } else if (cmd === '/ai') {
+          if (!canGoLive) store.addNote('未配置端点。用 VT_BASE_URL=<.../v1> VT_MODEL=<model> 重启。')
+          else {
+            sessionRef.value = makeSession('ai')
+            store.addNote(`已切到 AI SDK 工具 agent：${liveEnv.model}（工具循环上限 8 步）`)
+          }
+        } else if (cmd === '/fold') {
+          const collapsed = store.toggleAllGroups()
+          store.addNote(collapsed ? '已折叠全部分组（Ctrl+O 展开）' : '已展开全部分组（Ctrl+O 折叠）')
+        } else if (cmd === '/env') {
+          const p = describeProvider()
+          const dot = dotEnvResult()
+          for (const line of [
+            `provider  ${p.baseUrl} · model ${p.model} · key ${p.hasKey ? '已设置(不回显)' : '未设置'}`,
+            `agent 工作区  ${p.agentRoot}`,
+            `.env  ${dot.files.length ? `${dot.files.join(' + ')}（带入 ${dot.keys.length} 个键：${dot.keys.join(', ')}）` : '未发现（可复制 .env.example）'}`,
+          ]) store.addNote(line)
+        } else if (cmd === '/long') {
+          void runTurn('/long')
+          return
+        } else {
+          store.addNote(`未知命令：${cmd}（试试 /help）`)
+        }
+        scheduler.invalidate()
+        return
+      }
+      void runTurn(text)
+    }
+
+    /** 点击/回车落在某一行：是分组头部就折叠切换 */
+    function toggleRowAt(rowIndex: number | undefined): boolean {
+      if (rowIndex === undefined || rowIndex < 0) return false
+      const entry = store.entryAt(rowIndex)
+      if (!entry?.group) return false
+      store.toggleGroup(entry.group)
+      scheduler.invalidate()
+      return true
+    }
+
+    function onKey(event: TerminalKeyboardEvent): void {
+      if (event.key === 'Escape' && ui.streaming) {
+        event.preventDefault()
+        ui.aborted = true
+        return
+      }
+      if (event.key === 'End' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault()
+        transcriptRef.value?.scrollToBottom?.()
+        return
+      }
+      if (event.ctrlKey && !event.shiftKey && (event.key === 'o' || event.key === 'O')) {
+        event.preventDefault()
+        store.toggleAllGroups()
+        scheduler.invalidate()
+        return
+      }
+      if (event.ctrlKey && !event.shiftKey && (event.key === 't' || event.key === 'T')) {
+        event.preventDefault()
+        store.toggleLastGroup()
+        scheduler.invalidate()
+        return
+      }
+      if (event.ctrlKey && !event.shiftKey && (event.key === 'c' || event.key === 'C')) {
+        event.preventDefault()
+        props.onExit?.()
+      }
+    }
+
+    const phaseText = computed(() => {
+      if (ui.phase === 'thinking') return '✻ Thinking…'
+      if (ui.phase === 'tool') return '● Running tool…'
+      if (ui.phase === 'answering') return '✻ Streaming…'
+      return '✻ ready'
+    })
+
+    const statusLine = computed(() => {
+      const cols = size.value.cols
+      const stats = { ...store.stats.value, tokens: store.estimateTokens() }
+      const right = [
+        sessionRef.value.label,
+        `${stats.tokens} tok`,
+        `${stats.tools} tools`,
+        ui.streaming ? formatDuration(ui.elapsedMs) : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+      const left = `${phaseText.value}${ui.streaming ? '  (Esc 中断)' : ''}`
+      return padTo(left, Math.max(1, cols - 2 - cellWidth(right))) + right
+    })
+
+    const api: AppApi = {
+      submit: (text: string) => void handleSubmit(text),
+      interrupt: () => {
+        if (ui.streaming) ui.aborted = true
+      },
+      whenIdle: () => (ui.streaming ? new Promise<void>((resolve) => waiters.push(resolve)) : Promise.resolve()),
+      store,
+      toggleAll: () => {
+        const next = store.toggleAllGroups()
+        scheduler.invalidate()
+        return next
+      },
+      toggleLast: () => {
+        const id = store.toggleLastGroup()
+        scheduler.invalidate()
+        return id
+      },
+      groups: () =>
+        store.groupSummary().map((g) => ({ id: g.id, kind: g.kind, collapsed: g.collapsed, lines: g.lines })),
+      rowText: (y: number) =>
+        terminal
+          .getRow(y)
+          .map((cell) => cell.ch)
+          .join('')
+          .trimEnd(),
+      screenText: () => Array.from({ length: size.value.rows }, (_, y) => api.rowText(y)),
+      state: () => ({
+        phase: ui.phase,
+        streaming: ui.streaming,
+        tokens: store.estimateTokens(),
+        turns: store.stats.value.turns,
+        tools: store.stats.value.tools,
+        session: sessionRef.value.id,
+      }),
+    }
+
+    if (props.autoPrompt) setTimeout(() => api.submit(props.autoPrompt), 30)
+    setTimeout(() => props.onReady?.(api), 0)
+
+    return () => {
+      const cols = size.value.cols
+      const l = layoutOf(size.value.rows)
+      // 关键：在分支之前先读一次 version，让整个渲染函数成为它的依赖。
+      // 否则「空态」那一支不读任何响应式值，视图永远不会被唤醒去渲染正文。
+      const version = store.version.value
+      const header =
+        padTo('✻ Claude Code · vue-tui demo', Math.max(1, cols - 2 - cellWidth(sessionRef.value.label))) +
+        sessionRef.value.label
+      const empty = store.rowCount() === 0
+
+      return h(TView, { x: 0, y: 0, w: cols, h: size.value.rows, onKeydownCapture: onKey }, () => [
+        h(TRenderPlane, { plane: 'chrome', key: 'header' }, () => [
+          h(TText, { x: 1, y: l.headerY, w: cols - 2, h: 1, value: header, style: styles.header }),
+        ]),
+        h(TRenderPlane, { plane: 'transcript', key: 'body' }, () =>
+          empty
+            ? [
+                h(TText, {
+                  x: 2,
+                  y: l.transcriptY + 1,
+                  w: Math.max(10, cols - 4),
+                  h: l.transcriptH - 2,
+                  wrap: true,
+                  style: styles.toolSummary,
+                  value: [
+                    '用 vue-tui 搭的 Claude Code 风格终端界面 demo。',
+                    '',
+                    '输入一句话回车，就能看到完整链路：思考流 → 真实执行的工具调用 → 增量 markdown 正文。',
+                    '',
+                    '试试 /long 看长文本滚动，Esc 中断一轮，Ctrl+C 退出。',
+                  ].join('\n'),
+                }),
+              ]
+            : [
+                h(TTranscriptView, {
+                  ref: transcriptRef,
+                  x: 0,
+                  y: l.transcriptY,
+                  w: cols,
+                  h: l.transcriptH,
+                  source: store,
+                  version,
+                  autoStickToBottom: true,
+                  wheelScroll: true,
+                  selectable: true,
+                  wrap: true,
+                  keyboardRegions: true,
+                  // 注意：rowIndex 是**可见行**索引，必须走 entryAt()（折叠后 entries[] 与可见行不再一一对应）
+                  onFoldToggle: (payload: { rowIndex?: number }) => toggleRowAt(payload?.rowIndex),
+                  onToolClick: (payload: { rowIndex?: number }) => toggleRowAt(payload?.rowIndex),
+                  onRowClick: (payload: { rowIndex?: number }) => toggleRowAt(payload?.rowIndex),
+                }),
+              ],
+        ),
+        h(TRenderPlane, { plane: 'chrome', key: 'status' }, () => [
+          h(TText, { x: 1, y: l.statusY, w: cols - 2, h: 1, value: statusLine.value, style: styles.status }),
+        ]),
+        h(TRenderPlane, { plane: 'default', key: 'input' }, () => [
+          h(TInputBox, {
+            // TInputBox 不暴露 clear()/focus()，内部文本是它自己持有的；
+            // 提交后用 key 换一个新实例才是真正的"清空输入框"（否则下次输入会拼在旧文本后面）。
+            key: composerKey.value,
+            x: 0,
+            y: l.inputY,
+            w: cols,
+            h: 3,
+            title: ' 输入消息 · Enter 发送 ',
+            modelValue: input.value,
+            'onUpdate:modelValue': (v: string) => {
+              input.value = v
+            },
+            onChange: (v: string) => {
+              input.value = ''
+              composerKey.value += 1
+              void handleSubmit(String(v ?? ''))
+            },
+            autoFocus: true,
+          }),
+        ]),
+        h(TRenderPlane, { plane: 'chrome', key: 'hint' }, () => [
+          h(TText, { x: 1, y: l.hintY, w: cols - 2, h: 1, value: HINT, style: styles.hint }),
+        ]),
+      ])
+    }
+  },
+})
