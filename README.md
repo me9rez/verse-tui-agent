@@ -325,7 +325,8 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 
 ## 验证（实测）
 
-三个无头套件，退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来）：
+四个无头套件，退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来）。
+**它们都不会往仓库的 `.verse-sessions/` 写东西**：`smoke` 用临时目录（它要测落盘），`live` / `agent` 直接 `VT_NO_PERSIST=1`：
 
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|

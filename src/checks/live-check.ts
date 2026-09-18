@@ -22,6 +22,10 @@ import { loadDotEnv } from '../core/env.ts'
 // .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
 loadDotEnv()
 
+// 这条检查不测持久化，直接关掉落盘：否则会往仓库的 .verse-sessions/ 里写测试会话
+// （smoke 那条要测落盘，它用的是临时目录，见 smoke.ts）
+process.env.VT_NO_PERSIST = '1'
+
 
 const COLS = 100
 const ROWS = 44
