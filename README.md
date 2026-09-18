@@ -26,17 +26,25 @@
 ```bash
 pnpm install
 cp .env.example .env    # 填 provider；不填也能跑（默认离线 mock 剧本）
-pnpm dev                # 交互式
+pnpm dev                # 交互式（默认开一个新会话）
+
+VT_CONTINUE=1 pnpm dev  # 接着最近一次会话继续（转写与模型上下文一起恢复）
+pnpm dev -- --list-sessions          # 列出落盘的会话（不进 TUI，无需 TTY）
+pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 ```
+
+> 注意 `--continue` / `--session` 要用 `pnpm dev -- <flag>` 的形式（`pnpm dev --continue` 会被 pnpm 自己吞掉，
+> 传不进脚本）。嫌麻烦就用环境变量：`VT_CONTINUE=1` / `VT_SESSION=<id|last>`——效果一样。
 
 要求 **Node ≥ 22.18**（`node` 直接跑 `.ts`，靠内置类型剥离，不需要任何 flag；23.6+/24 同样可以）。
 
 | 命令 | 说明 |
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
-| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 20 项 + `.env` 加载行为 9 项（离线，不需要 key） |
+| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项 + `.env` 加载行为 9 项（离线，不需要 key） |
 | `pnpm live` | 无头：真实 SSE 端点的纯文本流 6 项 |
 | `pnpm agent` | 无头：AI SDK 工具 agent 10 项（含用 `fs` 独立核对模型写下的文件） |
+| `pnpm sessions` | 无头：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
 
@@ -85,6 +93,7 @@ agent 工作区  <repo>/.agent-sandbox
 | **点标题** | 鼠标点分组标题也能折叠 / 展开（库画 ▸/▾ 并带命中区） |
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
 | 命令 | `/help` `/clear` `/long` `/mock` `/live` `/ai` `/env` `/fold` `/exit` |
+| 会话 | `/sessions` 列表（▶ = 当前）· `/open <序号\|id>` 切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
 `/long` 会吐一段长回答，专门用来看长内容下的增量重绘与滚动保持。
 
@@ -267,6 +276,53 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 - **历史用 `result.responseMessages` 累积**（含 tool 消息），多轮能接着聊。
 - **这不是沙箱**：`bash` 跑的是真实命令，只是把 cwd 固定在 `.agent-sandbox`。别拿它跑不可信输入。
 
+## 持久会话与多会话
+
+一轮跑完（含 Esc 中断）就把这一轮落盘；`/open` 切回来时会**用同一套 store API 重放**转写
+（实时看到的排版与重开看到的排版是同一条代码路径），并把模型上下文一起恢复。
+
+```bash
+.verse-sessions/20260918-172237-uw3c.json   # 一会话一文件，默认在仓库根目录（已 gitignore）
+```
+
+```jsonc
+{
+  "v": 1,                                  // schema 版本；不兼容升级时 +1，坏文件会被跳过而不是崩
+  "id": "20260918-172237-uw3c",
+  "title": "这个 demo 的流式输出是怎么实现的？",   // 首条用户输入压平后截断 40 字
+  "kind": "ai",                            // mock | live | ai
+  "provider": { "host": "…", "model": "…" },     // 只记名字，**不存密钥**
+  "turns": [
+    {
+      "user": "这个 demo 的流式输出是怎么实现的？",
+      "thinking": ["…"],                   // 完整行（不是流式增量）
+      "tools": [{ "name": "read_file", "arg": "…", "params": { "path": "…" }, "status": "ok", "out": ["102| …"] }],
+      "answer": ["…"],
+      "agentState": [ /* 仅 ai 路：AI SDK 的消息数组，用于恢复多轮上下文 */ ]
+    }
+  ]
+}
+```
+
+三个开关：
+
+| 变量 | 作用 |
+|---|---|
+| `VT_SESSION_DIR` | 换会话目录（测试必须用它指到临时目录，别污染仓库） |
+| `VT_CONTINUE=1` / `VT_SESSION=<id\|last>` | 启动时恢复会话（等价于 `--continue` / `--session`） |
+| `VT_NO_PERSIST=1` | 完全不写磁盘（逃生门；此时 `/new` 只清空转写） |
+
+取舍（有意为之）：
+
+- **存「行」不存 delta**：重放等价的最小单位是行（`TranscriptStore` 的封行/围栏判定都发生在行粒度），
+  存增量只会把文件放大十倍。
+- **没有索引文件**：列表直接扫目录读每个文件（会话都很小），少一个需要维护同步的冗余结构。
+- **空会话不落盘**：新建后第一次写出内容时才建文件，不给列表塞空壳。
+- **`/open` 在流式中直接拒绝**（提示先 Esc）：少一条「中断 + 落盘 + 切换」的竞态路径。
+
+> 隐私：会话文件是**明文**，里面是你和模型的对话内容。它已进 `.gitignore`，但别把不该落盘的
+> 东西粘进对话；要彻底关掉就 `VT_NO_PERSIST=1`。
+
 ## 验证（实测）
 
 三个无头套件，退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来）：
@@ -275,7 +331,8 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 |---|---|---|
 | `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 20 + 9 = 29 |
 | `pnpm live` | 真实 SSE 端点的纯文本流 | 6 |
-| `pnpm agent` | 真实 API + 真实工具循环（含 `fs` 独立核对） | 10 |
+| `pnpm agent` | 真实 API + 真实工具循环（含 `fs` 独立核对与上下文快照） | 11 |
+| `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（临时目录） | 24 |
 
 断言的是**事实**而不是「函数被调用过」。真实输出：
 
@@ -334,6 +391,10 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 - **`styles` / `syntax` 别标成 `Record<string, Style>`**：那样 `styles.thinkingHeader` 这类拼错的键 tsc 查不出来，运行时拿到 `undefined` → 那一行**静默不上色**（终端不会报错）。本仓库曾有 3 个这样的引用（`thinkingHeader` / `userPrompt` / `dim`，其中 `dim` 影响所有工具输出行），改成强类型 const 后 tsc 立刻全部报出来。
 
 ## 已知边界
+
+- **`live`（裸 SSE）恢复的只有转写**：那一路没有服务端上下文可恢复，切回来之后下一轮是从零开始的对话；
+  `ai` 路才有 `agentState`（AI SDK 的消息数组）。
+- **多进程同时写同一个会话是 last-write-wins**：没有做文件锁。demo 场景够用，真要并发得先加锁。
 
 - mock 剧本会在正文末尾明说「本段文本来自本地剧本，不是真实模型输出」—— 演示不假装真模型。
 - **live 模式只做纯文本流，不解析 tool-call**；要真实模型调工具请用 `/ai`（AI SDK 那路）。

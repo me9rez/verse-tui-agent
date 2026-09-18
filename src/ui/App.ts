@@ -28,8 +28,9 @@ import type { AgentSession } from '../agent/session.ts'
 import { describeProvider, dotEnvResult } from '../core/env.ts'
 import { styles } from '../core/theme.ts'
 import { APP_NAME, HEADER_LABEL } from '../core/brand.ts'
-import { formatDuration } from '../core/text.ts'
+import { formatDuration, formatStamp } from '../core/text.ts'
 import {
+  deleteSession,
   latestSession,
   listSessions,
   loadSession,
@@ -248,7 +249,56 @@ export const App = defineComponent({
       if (!text) return
       if (text.startsWith('/')) {
         const cmd = text.split(/\s+/)[0]
-        if (cmd === '/new' || cmd.startsWith('/new ')) {
+        if (cmd === '/sessions') {
+          const all = listSessions()
+          if (!all.length) {
+            store.addNote(persist ? '还没有落盘的会话。' : '落盘已关闭（VT_NO_PERSIST=1）。')
+          } else {
+            const cur = current.session?.id
+            const lines = all.map((one, i) => {
+              const mark = one.id === cur ? '▶' : ' '
+              const when = formatStamp(one.updatedAt)
+              return `${mark} ${String(i + 1).padStart(2)}. ${when}  ${one.kind.padEnd(4)}  ${one.turns.length} 轮  ${one.title}`
+            })
+            store.addNote(['会话列表（▶ = 当前）：', ...lines, '用 /open <序号|id> 切换，/delete <序号|id> 删除'].join('\n'))
+          }
+        } else if (cmd === '/open' || cmd.startsWith('/open ')) {
+          if (ui.streaming) {
+            store.addNote('⚠ 正在跑一轮，先 Esc 中断再切换会话。')
+          } else if (!persist) {
+            store.addNote('落盘已关闭（VT_NO_PERSIST=1）：没有可切换的会话。')
+          } else {
+            const arg = raw.trim().slice(5).trim()
+            const all = listSessions()
+            const target = /^\d+$/.test(arg) ? all[Number(arg) - 1] : (all.find((one) => one.id === arg) ?? loadSession(arg))
+            if (!target) {
+              store.addNote(`没找到会话「${arg}」。用 /sessions 看列表。`)
+            } else {
+              openSession(target)
+              store.addNote(`已切到 ${target.id} · ${target.title}（${target.turns.length} 轮）`)
+            }
+          }
+        } else if (cmd === '/rename' || cmd.startsWith('/rename ')) {
+          const wanted = raw.trim().slice(7).trim()
+          if (!current.session) store.addNote('落盘已关闭（VT_NO_PERSIST=1），无处可改。')
+          else if (!wanted) store.addNote(`当前会话标题：${current.session.title}。用法 /rename <新标题>`)
+          else {
+            current.session.title = titleFromPrompt(wanted)
+            current.session.updatedAt = new Date().toISOString()
+            saveSession(current.session)
+            store.addNote(`标题已改为：${current.session.title}`)
+          }
+        } else if (cmd === '/delete' || cmd.startsWith('/delete ')) {
+          const arg = raw.trim().slice(7).trim()
+          const all = listSessions()
+          const target = /^\d+$/.test(arg) ? all[Number(arg) - 1] : loadSession(arg)
+          if (!target) store.addNote(`没找到会话「${arg}」。用 /sessions 看列表。`)
+          else if (target.id === current.session?.id) store.addNote('⚠ 不能删当前会话：先 /new 或 /open 切到别的会话。')
+          else {
+            deleteSession(target.id)
+            store.addNote(`已删除 ${target.id} · ${target.title}`)
+          }
+        } else if (cmd === '/new' || cmd.startsWith('/new ')) {
           const wanted = raw.trim().slice(4).trim()
           if (!persist) {
             store.addNote('落盘已关闭（VT_NO_PERSIST=1）：/new 只清空转写。')

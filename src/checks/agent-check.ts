@@ -243,6 +243,13 @@ check(
   `可见行 ${collapsedRows} → ${reExpandedRows}（与展开基线 ${expandedRows} 一致即说明往返无损）`,
 )
 
+// ai 路的上下文快照：/open 恢复模型记忆靠它（mock / live 路没有可恢复状态）
+check(
+  'ai 会话能导出上下文快照',
+  Array.isArray(api.sessionSnapshot()) && (api.sessionSnapshot() as unknown[]).length > 0,
+  `snapshot 是数组且长度 ${Array.isArray(api.sessionSnapshot()) ? (api.sessionSnapshot() as unknown[]).length : 'N/A'}`,
+)
+
 const failures = checks.filter((c) => !c.ok)
 mkdirSync('.artifacts', { recursive: true })
 const liveRows: Array<Array<{ ch?: string; style?: Record<string, unknown> }>> = []

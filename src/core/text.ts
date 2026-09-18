@@ -85,3 +85,11 @@ export function estimateTokens(text: string): number {
 export function formatDuration(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
+
+/** ISO 时间 → 本地 `MM-DD HH:MM`（会话列表用；toISOString 存的是 UTC，直接切字符串会显示成 UTC 时间） */
+export function formatStamp(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '--'
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}

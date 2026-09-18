@@ -292,6 +292,50 @@ check(
   })(),
 )
 
+// ── 多会话：/sessions 列表、/new 新建、/open 切换、/delete 保护当前 ──────
+api.submit('/sessions')
+await api.whenIdle()
+check(
+  '/sessions 列出会话并标记当前',
+  storeText().includes('会话列表') && storeText().includes('▶'),
+  `含列表头=${storeText().includes('会话列表')} 含 ▶=${storeText().includes('▶')}`,
+)
+
+const firstId = listSessions().at(-1)?.id ?? ''
+// 空会话不落盘（首次写出内容时才建文件），所以这里断言「当前会话 id 变了 + 转写清空」
+const idBeforeNew = api.currentSessionId()
+api.submit('/new 测试会话')
+await api.whenIdle()
+check(
+  '/new 换了新会话并清空转写',
+  api.currentSessionId() !== idBeforeNew &&
+    Boolean(api.currentSessionId()) &&
+    storeText().includes('已新建会话') &&
+    !storeText().includes('流式输出的关键就三步'),
+  `id ${idBeforeNew} → ${api.currentSessionId()}`,
+)
+
+api.submit(`/open ${firstId}`)
+await api.whenIdle()
+check(
+  '/open 恢复目标会话的转写',
+  storeText().includes('流式输出的关键就三步') && storeText().includes('已切到'),
+  `target=${firstId} 正文回来了=${storeText().includes('流式输出的关键就三步')}`,
+)
+check(
+  '/open 后当前会话确实切过去了',
+  api.currentSessionId() === firstId,
+  `current=${api.currentSessionId()} 期望=${firstId}`,
+)
+
+api.submit(`/delete ${firstId}`)
+await api.whenIdle()
+check(
+  '/delete 拒绝删当前会话',
+  storeText().includes('不能删当前会话'),
+  '出现拒绝提示',
+)
+
 const failures = checks.filter((c) => !c.ok)
 const report = {
   ok: failures.length === 0,

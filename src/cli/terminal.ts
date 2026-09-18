@@ -17,9 +17,34 @@ import {
 import { App, type AppApi } from '../ui/App.ts'
 import { rendererPalette, styles } from '../core/theme.ts'
 import { loadDotEnv } from '../core/env.ts'
+import { listSessions, sessionDir } from '../core/session/index.ts'
+import { formatStamp } from '../core/text.ts'
 
 // .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
 loadDotEnv()
+
+// ── 启动参数 ──────────────────────────────────────────────────────────────
+// 只有 --list-sessions 不需要 TTY（列完就退出），其余参数交给组件层。
+const argv = process.argv.slice(2)
+const wantList = argv.includes('--list-sessions')
+// 两种入口都支持：命令行 flag（node src/cli/terminal.ts --continue）与 VT_* 环境变量。
+// 环境变量这条是给 `pnpm dev` 用的——`pnpm dev --continue` 会被 pnpm 自己吞掉，传不进脚本。
+const wantContinue = argv.includes('--continue') || argv.includes('-c') || process.env.VT_CONTINUE === '1'
+const sessionArg = (() => {
+  const i = argv.findIndex((a) => a === '--session' || a === '-s')
+  return (i >= 0 ? argv[i + 1] : undefined) ?? process.env.VT_SESSION
+})()
+
+if (wantList) {
+  const all = listSessions()
+  if (!all.length) console.log(`还没有落盘的会话（目录：${sessionDir()}）。`)
+  for (const [i, one] of all.entries()) {
+    console.log(`${String(i + 1).padStart(2)}. ${formatStamp(one.updatedAt)}  ${one.kind.padEnd(4)}  ${one.turns.length} 轮  ${one.title}`)
+    console.log(`    id: ${one.id}    （继续：pnpm dev --session ${one.id}）`)
+  }
+  process.exit(0)
+}
+
 
 
 const MIN_COLS = 60
@@ -51,6 +76,7 @@ const app = createTerminalApp({
   rows,
   component: App,
   props: {
+    sessionId: sessionArg ?? (wantContinue ? 'last' : undefined),
     sessionKind: useAgent ? 'ai' : useLive ? 'live' : 'mock',
     speed,
     onReady(_api: AppApi) {
