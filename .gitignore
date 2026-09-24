@@ -6,3 +6,6 @@ node_modules/
 .verse-sessions/
 .hermes/
 dist/
+
+# 项目级 TOML 配置（机器本地，含端点/路径）
+.verse/

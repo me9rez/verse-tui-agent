@@ -9,12 +9,13 @@
   },
   "scripts": {
     "dev": "node src/cli/terminal.ts",
-    "smoke": "node src/checks/smoke.ts && node src/checks/env-check.ts",
+    "smoke": "node src/checks/smoke.ts",
     "shot": "node src/cli/shot.ts",
     "rpc": "node src/checks/rpc-check.ts",
     "complete": "node src/checks/complete-check.ts",
     "build": "tsdown",
     "backend": "cd backend && uv run python rpc_server.py",
+    "config-test": "cd backend && uv run python test_config.py",
     "typecheck": "tsc -p tsconfig.json",
     "sessions": "node src/checks/session-check.ts"
   },

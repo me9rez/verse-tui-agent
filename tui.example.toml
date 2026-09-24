@@ -1,0 +1,16 @@
+# Verse TUI 偏好 —— 复制到 ~/.verse/tui.toml；CLI flag 每次运行可覆盖本文件
+agent = "mock"          # mock（离线剧本）| rpc（唯一 agent 后端）
+speed = 1.0             # 流式节奏倍率（1 默认，0.3 更快）
+persist = true          # 会话落盘；false = 完全不动磁盘
+session_dir = ""        # 空 → <repo>/.verse-sessions
+debug_input = false     # true = 原始提交文本按 JSON 记入 .artifacts/input-debug.log
+
+[shot]                  # pnpm shot 出图默认（speed 不在此节：--speed > 0.05，不吃 tui.speed）
+cols = 110
+rows = 32
+mid_tool = false
+prompt = "这个 demo 的流式输出是怎么实现的？"
+
+[check]                 # pnpm rpc 断言预算
+timeout_ms = 150000
+prompt = ""

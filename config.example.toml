@@ -1,0 +1,28 @@
+# Verse gateway 配置 —— 复制到 ~/.verse/config.toml
+# Windows：%USERPROFILE%\.verse\config.toml   目录可用 VERSE_HOME 环境变量整体替换（唯一环境变量）
+# 项目级覆盖：<repo>/.verse/local.toml（同 schema，深合并，已 gitignore）
+# 字段名一律 snake_case；别名含 . 或 : 时表键加引号。
+
+default_model = "wb2api/cn:hy3"    # 必须是 [models] 里的别名
+default_mode  = "plan"             # plan | execute —— 新会话默认 harness 模式
+
+[gateway]
+host = "127.0.0.1"     # 改 0.0.0.0 前先想清楚安全边界
+port = 8765            # TUI 连接地址固定默认 ws://127.0.0.1:8765，改端口需同步 pnpm dev -- --url
+workspace = ""         # 空 → <repo>/.agent-sandbox（agent 工具工作区；不是沙箱，命令真跑）
+history   = ""         # 空 → <backend>/history（每 session 一个 JSONL）
+log_level = "INFO"
+
+[providers."wb2api"]
+type = "openai"                      # openai = Chat Completions | openai_responses = Responses API
+base_url = "http://127.0.0.1:7863/v1"
+api_key = ""                         # 明文写这里；config/get 只回 "***set***"，前端拿不到本体
+# 可选：Kimi 同款 env 子表 —— api_key 为空时取第一个非空值；只读本文件，不读 shell 环境
+# [providers."wb2api".env]
+# WB_API_KEY = "sk-xxx"
+
+[models."wb2api/cn:hy3"]
+provider = "wb2api"
+model = "cn:hy3"
+max_context_size = 131072            # 信息性字段，暂不消费
+display_name = "cn:hy3"
