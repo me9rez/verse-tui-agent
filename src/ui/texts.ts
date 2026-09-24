@@ -29,7 +29,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { cmd: '/delete', usage: '<序号|id>', desc: '删除某个会话（不能删当前）' },
   { cmd: '/mock', desc: '切回本地剧本' },
   { cmd: '/fold', desc: '折叠/展开全部（同一个 Ctrl+O）' },
-  { cmd: '/model', usage: '<id>', desc: '查看/切换后端模型（plan/todos 会重置）' },
+  { cmd: '/model', usage: '[<id>]', desc: '弹出模型选择器；带 id 直切（plan/todos 会重置）' },
   { cmd: '/exit', desc: '退出' },
 ]
 
