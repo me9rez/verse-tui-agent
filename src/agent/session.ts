@@ -1,7 +1,8 @@
 /**
  * 会话层：AgentSession 是「谁来产生流」的接缝。
- * - mockSession：本地剧本，自带节奏，离线可用（默认）。
- * - liveSession：OpenAI 兼容端点的真实 SSE 流（VT_LIVE=1 时启用）。
+ * - mockSession：本地剧本，自带节奏，离线可用（测试夹具）。
+ * - rpcSession：唯一 agent 后端——py/Agent Framework 的 JSON-RPC over WebSocket（VT_AGENT=rpc）。
+ *   （liveSession / aiSdkSession 已删除：agent 能力统一走 backend/，见 docs/architecture.md。）
  */
 /** 真实子进程描述：ToolStep 带了它，输出就是真跑出来的 stdout。 */
 export type ToolRun = { file: string; args: string[]; cwd?: string }

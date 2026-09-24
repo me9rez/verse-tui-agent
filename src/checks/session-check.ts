@@ -146,7 +146,7 @@ section('重放', () => {
           arg: 'node -e "统计行数"',
           params: { command: 'node -e "…"' },
           status: 'ok' as const,
-          out: ['96  src/agent/liveSession.ts'],
+          out: ['96  src/agent/rpcSession.ts'],
         },
       ],
       answer: [

@@ -120,9 +120,12 @@ VT_AGENT=rpc pnpm dev     # TUI 接上；或进 TUI 后敲 /rpc
 | kind | 处置 | 依据 |
 |---|---|---|
 | `rpc` | **主力**：唯一真实 agent 后端 | 本次合并的目标 |
-| `mock` | **永久保留**：离线测试夹具，不是 agent 后端 | `pnpm smoke` 29 项断言依赖；无 key 也能跑 |
-| `ai` | **冻结弃用**：不再新增能力，删除待单独决策 | 见 §11 |
-| `live` | **冻结弃用**：同上 | 同上 |
+| `mock` | **永久保留**：离线测试夹具，不是 agent 后端 | `pnpm smoke` 断言依赖；无 key 也能跑 |
+
+> `live` / `ai` 两条实现已于 2026-09-24 **删除**（连同 `live-check` / `agent-check` 套件、
+> `ai`/`@ai-sdk/*`/`zod` 依赖、`VT_LIVE`/`VT_BASE_URL`/`VT_MODEL`/`VT_API_KEY` 前端配置）；
+> `SessionKind` 同步收紧为 `'mock' | 'rpc'`，旧落盘会话文件里的 `live`/`ai` kind 会被跳过
+> （文件保留在磁盘，只是不再出现在 `/sessions` 列表）。见 §11。
 
 ### 5.2 双层持久化
 
@@ -182,7 +185,7 @@ agent  = create_harness_agent(
 明确禁止：
 
 - ❌ 在 `src/` 写工具执行、上下文拼接、提示词管理——这些是 Agent Framework/harness 的职责；
-- ❌ 绕过 `backend/` 从前端直连模型端点（`live` 路即因此弃用）；
+- ❌ 绕过 `backend/` 从前端直连模型端点（`live` 路即因此删除）；
 - ❌ 在协议里传 provider 密钥（key 只存在于后端进程环境）；
 - ❌ 引入第二个后端进程或第二套会话存储。
 
@@ -229,19 +232,22 @@ agent  = create_harness_agent(
 - [x] 前端 `VT_AGENT=rpc` / `/rpc` 为真实 agent 唯一入口；协议测试与端到端全绿
 - [x] 三处合并回归修复并有断言覆盖：cancel 应答 + -32001、同会话忙守卫 -32003、测试随机 sid（防历史跨次污染）
 - [x] 本 `docs/architecture.md` 成为方向的 single source of truth
+- [x] **删除 `live`/`ai` 两条会话实现**（2026-09-24）：`liveSession.ts`/`aiSdkSession.ts`/
+      `live-check.ts`/`agent-check.ts`/`debug-agent.ts` 删除，`ai`+`@ai-sdk/openai-compatible`+
+      `zod` 依赖移除，`/live` `/ai` 命令与 `VT_LIVE` 系配置清理，README 同步；
+      验收：全仓 typecheck 0 错、smoke/sessions/rpc/shot 全绿、README 无残留引用
+- [x] **`SessionKind` 收紧为 `'rpc' | 'mock'`**（2026-09-24）：旧 `live`/`ai` kind 的
+      `.verse-sessions` 文件被校验器跳过（磁盘文件不删）
 
 **待决策（不在本次范围，需单独排期）**：
 
-1. **删除 `live`/`ai` 两条会话实现**：会动 `live-check`/`agent-check` 两个套件与大段 README，
-   收益是砍掉 TS 侧 agent 代码（约 600 行）。验收口径：套件删除或改写后全仓 typecheck+smoke 零错、
-   README 无死链；
-2. `SessionKind` 是否收紧为 `'rpc' | 'mock'`（连带旧 `.verse-sessions` 文件的 kind 迁移）；
-3. 协议加鉴权（若未来要离开本机回环）；
-4. harness plan/todos 的跨服务端重启持久化（换 `FileSessionStore`）——按需求再做。
+1. 协议加鉴权（若未来要离开本机回环）；
+2. harness plan/todos 的跨服务端重启持久化（换 `FileSessionStore`）——按需求再做；
+3. 是否给旧 `live`/`ai` 会话文件做一次性 kind 迁移（当前选择跳过而非改写：转写仍可手工查阅）。
 
 **已知边界（不修，记录在案）**：
 
-- 跨 kind 混切（在 `ai` 会话里中途 `/rpc`）恢复时 `agentState` 形状不匹配，服务端历史在但客户端接不回；
+- 旧 kind=`live`/`ai` 的会话不出现在 `/sessions` 列表（校验器跳过，文件保留在磁盘）；
 - `thinking_*` 事件在 cn:hy3 下必然缺席（端点不返回思考字段，框架也不解析 `reasoning_content`）；
 - `FileHistoryProvider` 在 agent-framework 1.19.0 标记 experimental。
 
@@ -250,3 +256,4 @@ agent  = create_harness_agent(
 | 日期 | 变更 |
 |---|---|
 | 2026-09-24 | 方向确立：单仓 + Agent Framework 唯一后端；`file-history-demo` 迁入 `backend/`；本文档建立 |
+| 2026-09-24 | 删除 `live`/`ai` 后端与依赖，`SessionKind` 收紧为 `'mock' \| 'rpc'`——TS 侧不再有任何 agent 实现 |

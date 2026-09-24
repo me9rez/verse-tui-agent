@@ -4,7 +4,6 @@
  *   node src/cli/shot.ts                   # 默认 110x32，mock 剧本
  *   VT_SHOT_ROWS=64 node src/cli/shot.ts   # 更高视口，一轮内容全装下
  *   VT_SHOT_PROMPT=/long node src/cli/shot.ts
- *   VT_LIVE=1 VT_BASE_URL=... VT_MODEL=... node src/cli/shot.ts   # 用真实 API 出图
  *
  * 产物：.artifacts/demo.html + .artifacts/demo-screen.txt
  * 截图：chrome --headless=new --screenshot=demo.png file://.../demo.html
@@ -23,14 +22,8 @@ loadDotEnv()
 
 const COLS = Number(process.env.VT_SHOT_COLS ?? 110)
 const ROWS = Number(process.env.VT_SHOT_ROWS ?? 32)
-const live = process.env.VT_LIVE === '1'
 // 多轮：用 ;; 分隔（例：'这个 demo 怎么做的？;;/fold'），每轮等跑完再发下一轮
-const PROMPTS = (
-  process.env.VT_SHOT_PROMPT ??
-  (live
-    ? '用一个 ts 代码块加三条要点，讲清 Vue 3 自定义渲染器如何把组件画到终端里，控制在 15 行以内。'
-    : '这个 demo 的流式输出是怎么实现的？')
-)
+const PROMPTS = (process.env.VT_SHOT_PROMPT ?? '这个 demo 的流式输出是怎么实现的？')
   .split(';;')
   .map((p) => p.trim())
   .filter(Boolean)
@@ -48,7 +41,7 @@ const app = createTerminalApp({
   rows: ROWS,
   component: App,
   props: {
-    sessionKind: live ? 'live' : 'mock',
+    sessionKind: 'mock',
     speed,
     onReady(next: AppApi) {
       holder.api = next
@@ -76,7 +69,7 @@ const api: AppApi = holder.api
 for (const prompt of PROMPTS) {
   api.submit(prompt)
   // submit 只是启动一轮（异步），先等它真的开跑，再等它跑完——否则立刻查 streaming 会是 false。
-  const deadline = Date.now() + (live ? 120_000 : 30_000)
+  const deadline = Date.now() + 30_000
   while (!api.state().streaming && Date.now() < deadline) await sleep(5)
   if (midTool) {
     // 等到「有工具组正展开」的那一帧就停手：那一刻正是「当前组展开、前面的已收起」。
@@ -100,9 +93,7 @@ const probe = rows.flat().find((c) => c?.ch && c.ch.trim())
 console.log('cell 结构示例:', JSON.stringify(probe))
 
 mkdirSync('.artifacts', { recursive: true })
-const caption = live
-  ? `${HEADER_LABEL} · live ${process.env.VT_MODEL ?? ''} @ ${process.env.VT_BASE_URL ?? ''}`
-  : `${HEADER_LABEL} · ${COLS}×${ROWS} cells · 流式输出完成后的终端 buffer（行数/颜色取自 core buffer，非模拟）`
+const caption = `${HEADER_LABEL} · ${COLS}×${ROWS} cells · 流式输出完成后的终端 buffer（行数/颜色取自 core buffer，非模拟）`
 writeFileSync('.artifacts/demo.html', rowsToHtml(rows, { cols: COLS, caption }), 'utf8')
 writeFileSync(
   '.artifacts/demo-screen.txt',

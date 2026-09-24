@@ -22,8 +22,6 @@ import { HELP, HINT, NL, fitLine, stripControlChars } from './texts.ts'
 import { createTurnSink, type Phase } from './turn-sink.ts'
 import { createTranscriptStore, type TranscriptStore } from '../core/transcript/index.ts'
 import { createMockSession } from '../agent/mockSession.ts'
-import { createLiveSession } from '../agent/liveSession.ts'
-import { createAiSdkSession } from '../agent/aiSdkSession.ts'
 import { createRpcSession } from '../agent/rpcSession.ts'
 import type { AgentSession } from '../agent/session.ts'
 import { describeProvider, dotEnvResult } from '../core/env.ts'
@@ -69,7 +67,7 @@ export type AppApi = {
 export const App = defineComponent({
   name: 'VerseApp',
   props: {
-    sessionKind: { type: String as PropType<'mock' | 'live' | 'ai' | 'rpc'>, default: 'mock' },
+    sessionKind: { type: String as PropType<'mock' | 'rpc'>, default: 'mock' },
     /** 流式节奏倍数：1 = 演示速度，0 = 尽快跑完（smoke 用）。 */
     speed: { type: Number, default: 1 },
     autoPrompt: { type: String, default: '' },
@@ -96,22 +94,9 @@ export const App = defineComponent({
     const turn = ref(0)
     const waiters: Array<() => void> = []
 
-    const liveEnv = {
-      baseUrl: process.env.VT_BASE_URL ?? '',
-      model: process.env.VT_MODEL ?? '',
-      apiKey: process.env.VT_API_KEY,
-    }
-    const canGoLive = Boolean(liveEnv.baseUrl && liveEnv.model)
-    /** 四种会话：mock 剧本 / 裸 SSE / AI SDK 工具 agent / 远端 RPC harness */
-    const makeSession = (kind: string): AgentSession => {
-      if (kind === 'rpc') return createRpcSession()
-      if (!canGoLive) return createMockSession()
-      if (kind === 'ai') {
-        return createAiSdkSession({ ...liveEnv, root: process.env.VT_AGENT_ROOT ?? process.cwd() })
-      }
-      if (kind === 'live') return createLiveSession(liveEnv)
-      return createMockSession()
-    }
+    /** 两种会话：rpc（唯一 agent 后端，py/Agent Framework）/ mock（离线剧本夹具） */
+    const makeSession = (kind: string): AgentSession =>
+      kind === 'rpc' ? createRpcSession() : createMockSession()
     const sessionRef = ref<AgentSession>(makeSession(props.sessionKind))
 
     // ── 持久会话 ──────────────────────────────────────────────────────────
@@ -121,17 +106,12 @@ export const App = defineComponent({
     const current: { session: StoredSession | null } = { session: null }
 
     const providerInfo = (kind: SessionKind): { host?: string; model?: string } => {
-      if (kind === 'rpc') {
-        const rpcUrl = process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'
-        try {
-          return { host: new URL(rpcUrl).host, model: process.env.VT_RPC_MODEL ?? 'harness(rpc)' }
-        } catch {
-          return { host: rpcUrl }
-        }
-      }
-      return {
-        host: liveEnv.baseUrl ? new URL(liveEnv.baseUrl).host : undefined,
-        model: liveEnv.model || undefined,
+      if (kind !== 'rpc') return {} // mock 是离线剧本，没有 provider
+      const rpcUrl = process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'
+      try {
+        return { host: new URL(rpcUrl).host, model: process.env.VT_RPC_MODEL ?? 'harness(rpc)' }
+      } catch {
+        return { host: rpcUrl }
       }
     }
 
@@ -330,19 +310,6 @@ export const App = defineComponent({
         else if (cmd === '/mock') {
           sessionRef.value = createMockSession()
           store.addNote('已切回本地剧本。')
-        } else if (cmd === '/live') {
-          if (!canGoLive) {
-            store.addNote('未配置真实端点。用 VT_BASE_URL=<.../v1> VT_MODEL=<model> 重启，或按 /help 看用法。')
-          } else {
-            sessionRef.value = createLiveSession(liveEnv)
-            store.addNote(`已切到真实模型流：${liveEnv.model}`)
-          }
-        } else if (cmd === '/ai') {
-          if (!canGoLive) store.addNote('未配置端点。用 VT_BASE_URL=<.../v1> VT_MODEL=<model> 重启。')
-          else {
-            sessionRef.value = makeSession('ai')
-            store.addNote(`已切到 AI SDK 工具 agent：${liveEnv.model}（工具循环上限 8 步）`)
-          }
         } else if (cmd === '/rpc') {
           sessionRef.value = makeSession('rpc')
           store.addNote(
@@ -355,7 +322,7 @@ export const App = defineComponent({
           const p = describeProvider()
           const dot = dotEnvResult()
           for (const line of [
-            `provider  ${p.baseUrl} · model ${p.model} · key ${p.hasKey ? '已设置(不回显)' : '未设置'}`,
+            `后端  ${p.baseUrl} · model ${p.model} · key 由后端持有（前端不接触）`,
             `agent 工作区  ${p.agentRoot}`,
             `.env  ${dot.files.length ? `${dot.files.join(' + ')}（带入 ${dot.keys.length} 个键：${dot.keys.join(', ')}）` : '未发现（可复制 .env.example）'}`,
           ]) store.addNote(line)

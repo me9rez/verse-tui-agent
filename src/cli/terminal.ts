@@ -2,7 +2,7 @@
  * 交互式入口：真终端 + alternate screen。
  *
  *   pnpm dev                             # 本地剧本（离线）
- *   VT_LIVE=1 VT_BASE_URL=https://<endpoint>/v1 VT_MODEL=<model> pnpm dev
+ *   VT_AGENT=rpc pnpm dev   # 唯一 agent 后端（先 pnpm backend 起服务）
  *
  * 环境变量：
  *   VT_SPEED=2   流式节奏倍数（1 默认，0.3 更快）
@@ -66,8 +66,6 @@ const cols = Math.max(MIN_COLS, process.stdout.columns || 100)
 const rows = Math.max(MIN_ROWS, process.stdout.rows || 30)
 const requested = (process.env.VT_AGENT ?? '').toLowerCase()
 const useRpc = requested === 'rpc'
-const useAgent = requested === 'ai'
-const useLive = requested === 'live' || process.env.VT_LIVE === '1'
 const speed = Number(process.env.VT_SPEED ?? '1') || 1
 
 let exiting = false
@@ -78,7 +76,7 @@ const app = createTerminalApp({
   component: App,
   props: {
     sessionId: sessionArg ?? (wantContinue ? 'last' : undefined),
-    sessionKind: useRpc ? 'rpc' : useAgent ? 'ai' : useLive ? 'live' : 'mock',
+    sessionKind: useRpc ? 'rpc' : 'mock',
     speed,
     onReady(_api: AppApi) {
       /* 交互模式下不需要句柄 */

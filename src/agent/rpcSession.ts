@@ -1,11 +1,10 @@
 /**
  * RPC 会话：WebSocket + JSON-RPC 2.0 连远端 harness agent 后端（rpc_server.py）。
  *
- * 这是 AgentSession 接缝的第四个实现：
- *   mockSession  —— 本地剧本（离线）
- *   liveSession  —— 裸 SSE 纯文本流
- *   aiSdkSession —— 本地工具循环（AI SDK）
- *   rpcSession   —— 把整轮对话交给远端 harness（本文件），工具/计划/历史都在服务端
+ * 这是 AgentSession 接缝的 agent 后端实现（唯一）：
+ *   mockSession  —— 本地剧本（离线测试夹具，非 agent 后端）
+ *   rpcSession   —— 把整轮对话交给远端 harness（本文件），工具/计划/历史都在服务端。
+ *     原 liveSession / aiSdkSession 已删除：agent 能力统一在 py 后端用 Agent Framework 开发。
  *
  * 协议（与 rpc_server.py 的 docstring 一致）：
  *   请求  {jsonrpc:"2.0", id, method:"agent/chat", params:{session, prompt}}

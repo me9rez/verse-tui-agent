@@ -27,10 +27,6 @@ const NL = String.fromCharCode(10)
 export const KNOWN_KEYS = [
   'VT_AGENT',
   'VT_AGENT_ROOT',
-  'VT_BASE_URL',
-  'VT_MODEL',
-  'VT_API_KEY',
-  'VT_LIVE',
   'VT_RPC_URL',
   'VT_RPC_MODEL',
   'VT_SPEED',
@@ -100,28 +96,27 @@ export function loadDotEnv(root: string = process.cwd()): DotEnvResult {
   return cached
 }
 
-/** 供界面展示：脱敏后的配置概览（永远不出现密钥本体）。 */
+/** 供界面展示：脱敏后的配置概览（永远不出现密钥本体）。
+ *  唯一 agent 后端是 rpc：前端只连 WebSocket，模型与 key 都由 backend/ 持有。 */
 export function describeProvider(env: NodeJS.ProcessEnv = process.env): {
   baseUrl: string
   model: string
-  hasKey: boolean
   agentRoot: string
   rawRoot: string
 } {
-  const baseUrl = env.VT_BASE_URL ?? ''
+  const rpcUrl = env.VT_RPC_URL || 'ws://127.0.0.1:8765'
   let host = ''
   try {
-    host = baseUrl ? new URL(baseUrl).host : ''
+    host = new URL(rpcUrl).host
   } catch {
-    host = baseUrl
+    host = rpcUrl
   }
   // 工作区展示成绝对路径：.env 里通常写相对路径，光看 ./xxx 不知道 agent 到底会动哪个目录
   const rawRoot = env.VT_AGENT_ROOT || process.cwd()
   const absRoot = path.resolve(rawRoot)
   return {
     baseUrl: host || '(未设置)',
-    model: env.VT_MODEL || '(未设置)',
-    hasKey: Boolean(env.VT_API_KEY),
+    model: env.VT_RPC_MODEL || '(后端配置)',
     agentRoot: `${absRoot}${existsSync(absRoot) ? '' : '（不存在，跑工具时会报错）'}`,
     rawRoot,
   }

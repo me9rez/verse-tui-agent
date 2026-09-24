@@ -1,6 +1,6 @@
 /**
  * 把终端 buffer 的行/格子转成带颜色的 HTML（供浏览器打开或 headless 截图）。
- * shot.ts 与 live-check.ts 共用，避免两份实现漂移。
+ * shot.ts 与 checks 共用，避免多份实现漂移。
  */
 import { APP_ID, HEADER_LABEL } from './brand.ts'
 

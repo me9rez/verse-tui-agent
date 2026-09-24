@@ -87,7 +87,7 @@ push(delta: string) {
 
 配合 \`autoStickToBottom\`，只要用户没往上滚，新内容就会顶在底部；一旦用户滚上去，视图就不再抢滚动位置——「看历史时输出不会把你拽下来」是终端 agent 的通行做法。
 
-> 提示：本段文本来自本地剧本，不是真实模型输出；设 \`VT_LIVE=1\` 可以换成真实端点的 SSE 流。`,
+> 提示：本段文本来自本地剧本，不是真实模型输出；\`VT_AGENT=rpc pnpm dev\` 可接唯一 agent 后端（需先 pnpm backend）。`,
   },
 ]
 

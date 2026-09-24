@@ -14,10 +14,10 @@
 
 - **流式**：增量按物理行累积，视图只重绘脏行（双版本号：行的 `rev` + 数据源的 `version`）。
 - **折叠**：每个「思考」和每次「工具调用」都是一个可折叠组，头部常驻、内容随状态显隐（`Ctrl+T` 最后一个 / `Ctrl+O` 全部 / 点标题）。
-- **工具**：AI SDK 工具循环（`read_file` / `write_file` / `edit_file` / `bash` / `ls`），`bash` 的 stdout **边跑边写进转写**。
-- **三路会话**：离线 mock 剧本（默认，保证离线可演示）/ 裸 SSE 纯文本流 / AI SDK 工具 agent —— `/mock` `/live` `/ai` 随时切。
+- **工具**：工具循环与执行在唯一 agent 后端（`backend/`，Python/Agent Framework），TUI 只渲染 `tool_start/line/end` 事件，`bash` 的 stdout **边跑边写进转写**。
+- **两路会话**：离线 mock 剧本（默认，保证离线可演示）/ rpc 唯一 agent 后端 —— `/mock` `/rpc` 随时切。
 - **provider 配在 `.env`**：`.env` → `.env.local` 后者覆盖，命令行里已有的变量永不被文件覆盖。
-- **无头可验证**：三套断言脚本（27 + 6 + 10 项），退出码即结论；关键结论用 `fs` 独立核对，不采信模型自述。
+- **无头可验证**：断言脚本（smoke + rpc + 后端协议级），退出码即结论；关键结论用 `fs` 独立核对，不采信模型自述。
 
 依赖极简：`node` 直接跑 TypeScript（类型剥离），**没有打包器、没有构建步骤**。
 
@@ -44,8 +44,6 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
 | `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项 + `.env` 加载行为 9 项（离线，不需要 key） |
-| `pnpm live` | 无头：真实 SSE 端点的纯文本流 6 项 |
-| `pnpm agent` | 无头：AI SDK 工具 agent 10 项（含用 `fs` 独立核对模型写下的文件） |
 | `pnpm rpc` | 无头：WebSocket JSON-RPC 后端 6 项（需先起 `pnpm backend`） |
 | `pnpm sessions` | 无头：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
@@ -58,13 +56,14 @@ provider 配置放 `.env`（已被 `.gitignore` 忽略），每个入口文件�
 ```bash
 cp .env.example .env
 # .env
-VT_AGENT=ai                        # mock（默认）| live | ai
-VT_BASE_URL=https://<your-endpoint>/v1   # 任何 OpenAI 兼容端点
-VT_MODEL=<model-id>
-VT_API_KEY=<key>                   # 只留在本机文件里，不进命令行、不进仓库
-VT_AGENT_ROOT=./.agent-sandbox      # 工具只能动这个目录
+VT_AGENT=rpc                       # mock（默认，离线）| rpc（唯一 agent 后端）
+VT_RPC_URL=ws://127.0.0.1:8765     # pnpm backend 起的服务
+VT_RPC_MODEL=cn:hy3                # 展示用；实际模型由后端 AGENT_RPC_MODEL 决定
+VT_AGENT_ROOT=./.agent-sandbox      # agent 工具工作区（后端 AGENT_RPC_WORKSPACE 默认同目录）
 VT_SPEED=1                          # 流式速度倍率，调试用
 ```
+
+模型与密钥**不在前端配置**：它们是后端的 `AGENT_RPC_*` 环境变量（见 `docs/architecture.md` §8）。
 
 加载规则（9 项断言守着，见 `pnpm smoke` 的第二段）：
 
@@ -79,9 +78,9 @@ VT_SPEED=1                          # 流式速度倍率，调试用
 进 TUI 后用 `/env` 随时看当前生效的配置（脱敏）：
 
 ```
-provider  <host> · model <model-id> · key 已设置(不回显)
+后端  127.0.0.1:8765 · model cn:hy3 · key 由后端持有（前端不接触）
 agent 工作区  <repo>/.agent-sandbox
-.env  .env（带入 6 个键：VT_AGENT, VT_BASE_URL, VT_MODEL, VT_API_KEY, VT_AGENT_ROOT, VT_SPEED）
+.env  .env（带入 4 个键：VT_AGENT, VT_RPC_URL, VT_AGENT_ROOT, VT_SPEED）
 ```
 
 ## 交互
@@ -95,7 +94,7 @@ agent 工作区  <repo>/.agent-sandbox
 | **`Ctrl+O`** | **折叠 / 展开全部分组** |
 | **点标题** | 鼠标点分组标题也能折叠 / 展开（库画 ▸/▾ 并带命中区） |
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
-| 命令 | `/help` `/clear` `/long` `/mock` `/live` `/ai` `/env` `/fold` `/exit` |
+| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/exit` |
 | 会话 | `/sessions` 列表（▶ = 当前）· `/open <序号\|id>` 切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
 `/long` 会吐一段长回答，专门用来看长内容下的增量重绘与滚动保持。
@@ -108,7 +107,7 @@ agent 工作区  <repo>/.agent-sandbox
 |---|---|---|
 | 用户消息 / 正文 / 分组头部 | 0 | `> 问题` · `▾ ● Bash(...)  · ok` · `▸ ✻ Thinking  · 2 行已折叠` |
 | 组内 section | 2 | `params` · `out` |
-| section 的值行 | 4 | `command: dir /b` · `357  src/agent/aiSdkSession.ts` |
+| section 的值行 | 4 | `command: dir /b` · `357  src/agent/rpcSession.ts` |
 
 留白：每个块（用户消息 / 思考组 / 工具组 / 正文 / 提示）开始前插**一行空行**，由 `store.blank()` 统一处理 —— 它只在「上一行不是空行」时插入，所以不会出现连续空行。这一条是观感的关键。
 
@@ -136,7 +135,7 @@ agent 工作区  <repo>/.agent-sandbox
 | 但它的 `body` 是**段落式**：段内换行不断行，塞不下 params / 输出 | 内容行仍是独立 row，**显隐由数据源过滤**（`visibleEntries()` 按组过滤） |
 | 折叠必须真的减少可见行 | `rowCount()` / `getRow()` 都走过滤后的行；`toggleGroup()` 里 `version++` 让视图重算 |
 
-工具参数来自会话层的 `ToolStep.params`（AI SDK 那路直接透传工具的 `input` 对象）。展示前每值截断到 120 字符，长文本显示成 `content: (43 字符)` 而不是啰嗦全文：
+工具参数来自会话层的 `ToolStep.params`（rpc 后端在服务端把 function_call 参数拼完整后透传）。展示前每值截断到 120 字符，长文本显示成 `content: (43 字符)` 而不是啰嗦全文：
 
 ```
 ● Bash(node -e "统计 src 下各文件行数")  · ok
@@ -144,7 +143,7 @@ agent 工作区  <repo>/.agent-sandbox
     command: node -e "<walk src/*.ts and count lines>"
     timeout_ms: 20000
   out
-    96  src/agent/liveSession.ts
+    96  src/agent/rpcSession.ts
     ...
 ```
 
@@ -163,8 +162,8 @@ node src/probes/foldrule.ts
 #   idle      展开: （无，全部收起）    ← 回合结束
 ```
 
-> `pnpm live` / `pnpm agent` 会真的打端点：背靠背连续跑会撞上游 RPM 限流（实测免费档 10 RPM），
-> 报 `AI_APICallError: request limited RPM reached` 时等一分钟再单跑一次即可，不是代码问题。
+> `pnpm rpc` 会真的打后端与模型端点：背靠背连续跑会撞上游 RPM 限流，
+> 转写里出现 `[RPC 错误]` 时等一分钟再单跑一次即可，不是代码问题。
 
 ### 颜色：真彩 / 256 / 16 / 8 四级
 
@@ -194,7 +193,7 @@ VUE_TUI_COLOR_MODE=ansi16 node src/probes/color.ts   # 按转义形式分类计�
 | 位置 | 上色方式 |
 | --- | --- |
 | **代码块** | 按围栏语言做语法高亮：关键字 / 字符串 / 数字 / 函数名 / 类型 / 注释 各一色。实现在 `src/core/syntax.ts`（约 200 行，关键字表驱动，**不引 shiki / highlight.js**——那些库产出 HTML 或主题 JSON，几百 KB 起步还得再映射回 ANSI） |
-| **工具组头部** | 按工具类型上色：`read*` 蓝 · `write*` 绿 · `edit*` 琥珀 · `bash` 橙 · `ls` 青 · `grep` 品红。名字做前缀归一化，mock 剧本的 `Read(...)` 与 AI SDK 的 `read_file` 都认 |
+| **工具组头部** | 按工具类型上色：`read*` 蓝 · `write*` 绿 · `edit*` 琥珀 · `bash` 橙 · `ls` 青 · `grep` 品红。名字做前缀归一化，mock 剧本的 `Read(...)` 与后端的 `todos_add` / `read_file` 都认 |
 | **工具参数** | `key:` 暗灰 + 值亮色分两段，扫参数时不用逐字读 |
 | **分组头部** | 思考组暗色斜体，工具组按类型（见上），折叠后追加的「N 行已折叠」统一淡灰 |
 | **其它** | 用户消息 `>` 前缀用 accent 色、状态栏按状态绿/红、markdown 行内 `code` 带底色、正文里的 `**粗体**`/`*斜体*`/链接各有样式 |
@@ -216,10 +215,8 @@ src/
     shot.ts                出图：把跑完的 buffer 转成带色 HTML（多轮用 ;; 分隔）
   checks/                断言脚本：退出码即结果
     smoke.ts               渲染 / 流式 / 折叠 / 颜色 20 项（离线 mock）
-    live-check.ts          真实 SSE 端点 6 项
-    agent-check.ts         AI SDK 工具 agent 10 项（含 fs 独立核对）
-    rpc-check.ts           WebSocket JSON-RPC 后端 6 项（需服务端在跑）
     env-check.ts           .env 加载行为 9 项（优先级 / 覆盖 / 坏行 / 不外泄）
+    rpc-check.ts           WebSocket JSON-RPC 后端 6 项（需 pnpm backend 在跑）
   probes/                一次性探针：摸清库行为 + 排版回归
     toolrow.ts / foldmark.ts / indent.ts / layout.ts / debug-agent.ts
   ui/                    界面层
@@ -238,9 +235,7 @@ src/
   agent/                 会话层（同一接缝的多个实现）
     session.ts             接缝类型（AgentSession / StreamStep / ToolStep / TurnSink）
     mockSession.ts         本地剧本（工具步骤真的起子进程）
-    liveSession.ts         裸 SSE 纯文本流
-    aiSdkSession.ts        AI SDK 工具 agent（read / write / edit / bash / ls）
-    rpcSession.ts          远端 harness 后端（WebSocket + JSON-RPC 2.0）
+    rpcSession.ts          唯一 agent 后端客户端（WebSocket + JSON-RPC 2.0）
 ```
 
 导入方向是单向的：`cli/checks/probes → ui/agent → core`，core 内部 `store → rows → markdown → types`，无反向依赖、无循环。`checks/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
@@ -248,45 +243,17 @@ src/
 数据流：
 
 ```
-会话层(剧本 / SSE / AI SDK)  ──delta──▶  TranscriptStore  ──version──▶  TTranscriptView  ──只重绘脏行──▶  终端 buffer
+会话层(本地剧本 / RPC 后端)  ──delta──▶  TranscriptStore  ──version──▶  TTranscriptView  ──只重绘脏行──▶  终端 buffer
 ```
 
 版面按 plane 分区（库的 `TRenderPlane`）：transcript（每 10~20ms 一次）、chrome 状态栏（每 100ms 一次）、输入框（只在按键时）互不干扰 —— 正文刷 30 行也不会让输入框光标闪一下。
-
-## AI SDK 工具 agent
-
-`src/agent/aiSdkSession.ts`：用 Vercel AI SDK（`ai@7` + `@ai-sdk/openai-compatible` + `zod`）写的极简编码 agent，工具集形状参照 [pi](https://github.com/badlogic/pi-mono)。
-
-```bash
-# 交互式：模型自己决定读哪个文件、跑什么命令
-VT_AGENT=ai pnpm dev
-
-# 无头端到端：10 项断言，含「用 fs 独立核对模型说写下的文件」
-pnpm agent
-```
-
-```
-streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
-  fullStream ─┬─ reasoning-delta ──▶ 思考行
-              ├─ tool-call        ──▶ 新建工具行（按 toolCallId 建键，并发不串行）
-              ├─ tool-result      ──▶ 工具行标 ok / err
-              └─ text-delta       ──▶ 正文行（逐行 markdown）
-```
-
-几个刻意的点：
-
-- **工具在 `respond()` 内部创建**，闭包直接拿到 sink —— `bash` 的 stdout 因此是边跑边写进转写的。
-- **工具行按 `toolCallId` 建键**：一个 step 里并发多个调用不会错位。
-- **文件工具限制在 `VT_AGENT_ROOT` 内**，越界路径直接拒绝；`edit_file` 要求唯一匹配，不唯一就报错。
-- **历史用 `result.responseMessages` 累积**（含 tool 消息），多轮能接着聊。
-- **这不是沙箱**：`bash` 跑的是真实命令，只是把 cwd 固定在 `.agent-sandbox`。别拿它跑不可信输入。
 
 ## 唯一后端：Agent Framework（WebSocket + JSON-RPC 2.0）
 
 **方向（见 `docs/architecture.md`）**：本仓库单仓 = TUI + `backend/`（Python），`backend/` 是唯一
 agent 后端，所有 agent 能力统一用 Microsoft Agent Framework 的 harness（`create_harness_agent`：
 todo/工具循环 + FileHistoryProvider 跨进程历史）在 `backend/` 内开发；TS 侧只做渲染与会话编排。
-`live` / `ai` 两条旧实现已冻结弃用（删除待单独决策），`mock` 永久保留为离线测试夹具。
+`live` / `ai` 两条旧实现**已删除**，`mock` 永久保留为离线测试夹具。
 
 ```bash
 # 1. 起后端（= cd backend && uv run python rpc_server.py；首次先 cd backend && uv sync）
@@ -347,7 +314,7 @@ pnpm rpc                                                  # 6 项（TUI↔后端
       "thinking": ["…"],                   // 完整行（不是流式增量）
       "tools": [{ "name": "read_file", "arg": "…", "params": { "path": "…" }, "status": "ok", "out": ["102| …"] }],
       "answer": ["…"],
-      "agentState": [ /* 仅 ai 路：AI SDK 的消息数组；rpc 路存 {sid}（服务端会话 id），用于恢复多轮上下文 */ ]
+      "agentState": [ /* 仅 rpc 路：{sid}（服务端会话 id），用于恢复多轮上下文 */ ]
     }
   ]
 }
@@ -380,8 +347,6 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|
 | `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 20 + 9 = 29 |
-| `pnpm live` | 真实 SSE 端点的纯文本流 | 6 |
-| `pnpm agent` | 真实 API + 真实工具循环（含 `fs` 独立核对与上下文快照） | 11 |
 | `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（需 `pnpm backend` 在跑） | 6 |
 | `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码（`uv run python test_rpc.py`） | 11 |
 | `backend/test_switch.py` | 协议级：会话切换/隔离/重连恢复（`uv run python test_switch.py`） | 6 |
@@ -402,19 +367,6 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 ✔ 代码块按语言上色 — 5 行代码，合计 5 种前景色：#c9d1f2 #7fb3ff #c678dd #56b6c2 #6f7480
 ✔ 分组头部按类型上色 — 头部出现 4 种颜色：#8b8b93 #5a5a63 #7fb3ff #d97757
 
-# pnpm live（真实端点，约 1875 tok 的一轮）
-✔ 端点真的在流式返回 — 采样 562 次，version 跨度 1478
-✔ 模型文本进入了转写 — 21 行正文，约 1875 tok
-✔ markdown 被解析成结构化行 — 行样式集合：code/plain/bullet
-✔ 耗时合理 — 整轮 19.6s
-
-# pnpm agent（真实 API + 真实工具）
-✔ 模型写下的文件在磁盘上真的存在且内容正确 — 磁盘上 3 行，第 2 行含关键句
-✔ bash 的真实输出进了转写 — 工具输出 31 行；含 demo.txt = true
-✔ 流式是增量的 — 采样 372 次，version 跨度 237
-✔ 折叠真的收起内容（可见行下降 + ▸ 标记） — 可见行 88 → 40
-✔ 再展开恢复（▾ 且行数变多） — 可见行 40 → 205
-
 # pnpm rpc（真实 WS + JSON-RPC，后端 cn:hy3 harness）
 ✔ RPC 后端真的在流式推事件 — 采样 155 次，version 跨度 96
 ✔ 没有 HTTP/网络/RPC 错误 — 转写里没有 [请求失败]/[流中断]/[RPC 错误]
@@ -425,9 +377,8 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 两条断言纪律值得单独说：
 
 - **折叠状态断言读的是行数据，不是屏幕像素**。屏幕受视口滚动影响，会变成 flaky 测试；`getRow()` 拿到的「喂给视图的东西」才是确定的。渲染是否真的落到终端上，另有从库的真实 buffer 读回屏幕文本的断言（`screenText()`）守着，两者分开。
-- **模型自述「我写好了」不算数**：`pnpm agent` 用 `fs` 独立把那个文件读回来核对（存在 + 行数 + 关键句），而不是相信转写里的文字。
 
-产物落在 `.artifacts/`：`smoke-screen.txt`、`smoke-report.json`、`agent-report.json`、`live-report.json`。
+产物落在 `.artifacts/`：`smoke-screen.txt`、`smoke-report.json`、`rpc-screen.txt`、`rpc-report.json`、`demo.html`。
 
 ## 踩过的坑
 
@@ -451,19 +402,18 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 
 ## 已知边界
 
-- **`live`（裸 SSE）恢复的只有转写**：那一路没有服务端上下文可恢复，切回来之后下一轮是从零开始的对话；
-  `ai` 路才有 `agentState`（AI SDK 的消息数组）。
+- **会话恢复依赖服务端**：rpc 路的 `agentState` 只存 `{sid}`，对话历史在 `backend/history/`；
+  后端换了历史目录（`AGENT_RPC_HISTORY`），旧会话就接不回模型上下文（转写仍可重放）。
 - **多进程同时写同一个会话是 last-write-wins**：没有做文件锁。demo 场景够用，真要并发得先加锁。
 
 - mock 剧本会在正文末尾明说「本段文本来自本地剧本，不是真实模型输出」—— 演示不假装真模型。
-- **live 模式只做纯文本流，不解析 tool-call**；要真实模型调工具请用 `/ai`（AI SDK 那路）。
 - 思考 / 工具的分组状态**不进会话历史**：重启后新会话是全新状态。
 - 表格（`| a | b |`）不做特殊渲染，按原文输出。
 - 折叠只影响**显示**：内容行仍在内存里（`visibleEntries()` 过滤），展开是瞬时且不重跑任何东西。
 - 长回答的虚拟化依赖 `TTranscriptView` 内部实现，本项目未测帧率上限。
 - 换行由库负责，**续行没有悬挂缩进**：折行后从第 0 列开始。要做悬挂缩进得按视口宽度预折行，而宽度随 resize 变，收益不抵复杂度。
 - 工具输出按原样显示，所以工具自身的对齐（例如 `wc -l` 式数字右对齐）会保留。
-- 每次 `pnpm live` / `pnpm agent` 都会真的请求端点：注意上游的 RPM 配额。
+- 每次 `pnpm rpc` 都会真的请求后端与模型端点：注意上游的 RPM 配额。
 
 ## 许可
 

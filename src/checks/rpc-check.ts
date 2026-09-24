@@ -10,7 +10,7 @@
  *   3. 没有 [请求失败]/[流中断]/[RPC 错误] 字样（HTTP/网络/RPC 错误都会写进转写）
  *   4. markdown 结构被解析（存在 code/heading/bullet 等非 plain 行）
  *
- * 与 live-check 一样 VT_NO_PERSIST=1：不往仓库 .verse-sessions/ 写测试会话。
+ * 与 smoke 一样用 VT_NO_PERSIST=1：不往仓库 .verse-sessions/ 写测试会话。
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'

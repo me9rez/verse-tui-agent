@@ -161,7 +161,7 @@ check(
 )
 check(
   '正文末尾画在屏幕上（自动贴底）',
-  /不会把你拽下来|VT_LIVE=1/.test(afterFirst),
+  /不会把你拽下来/.test(afterFirst),
   '视口底部是回答的最后一段：autoStickToBottom 生效',
 )
 check(
