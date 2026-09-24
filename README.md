@@ -17,7 +17,7 @@
 - **工具**：工具循环与执行在唯一 agent 后端（`backend/`，Python/Agent Framework），TUI 只渲染 `tool_start/line/end` 事件，`bash` 的 stdout **边跑边写进转写**。
 - **两路会话**：离线 mock 剧本（默认，保证离线可演示）/ rpc 唯一 agent 后端 —— `/mock` `/rpc` 随时切。
 - **配置全在 TOML**：`~/.verse/config.toml`（provider/模型，后端读）+ `~/.verse/tui.toml`（界面偏好）+ 项目级 `.verse/local.toml` 深合并覆盖；没有业务环境变量（唯一 `VERSE_HOME` 换目录）。见「配置」一节。
-- **无头可验证**：断言脚本（smoke + rpc + 后端协议级），退出码即结论；关键结论用 `fs` 独立核对，不采信模型自述。
+- **无头可验证**：vitest（`test/`）+ pytest（`backend/tests/`）双端套件，退出码即结论；关键结论用 `fs` 独立核对，不采信模型自述。
 
 依赖极简：`node` 直接跑 TypeScript（类型剥离），**没有打包器、没有构建步骤**。
 
@@ -43,11 +43,13 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | 命令 | 说明 |
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
-| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 / 落盘 20 项（离线，不需要 key） |
-| `pnpm complete` | 无头：slash 命令补全的按键链路 4 项（离线 mock） |
-| `pnpm rpc` | 无头：WebSocket JSON-RPC 后端 6 项（需先起 `pnpm backend`） |
-| `pnpm sessions` | 无头：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
-| `pnpm config-test` | 后端 TOML 配置加载 19 项（深合并/脱敏/坏文件回退，离线） |
+| `pnpm test` | vitest 全量：smoke + sessions + complete + rpc 四文件（rpc 需 `pnpm backend`） |
+| `pnpm smoke` | vitest：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项软断言（离线，不需要 key） |
+| `pnpm complete` | vitest：slash 命令补全的按键链路 5 项（离线 mock） |
+| `pnpm rpc` | vitest：WebSocket JSON-RPC 后端 8 项（需先起 `pnpm backend`） |
+| `pnpm sessions` | vitest：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
+| `pnpm config-test` | pytest：后端 TOML 配置 9 函数 23 断言（深合并/脱敏/坏文件回退，离线） |
+| `pnpm test:backend` | pytest 全量：20 函数 53 断言（protocol 十秒内；agent/switch 打真模型） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm build` | tsdown 编译 `src/cli` 两个入口到 `dist/`（`bin`: `verse` → `dist/terminal.mjs`，带 shebang 可直接执行） |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
@@ -210,11 +212,7 @@ src/
   cli/                   可执行入口
     terminal.ts            交互式 TUI：createTerminalApp + stdout 渲染器 + stdin driver + 退出清理
     shot.ts                出图：把跑完的 buffer 转成带色 HTML（多轮用 ;; 分隔）
-  checks/                断言脚本：退出码即结果
-    smoke.ts               渲染 / 流式 / 折叠 / 颜色 20 项（离线 mock）
-    rpc-check.ts           WebSocket JSON-RPC 后端 6 项（需 pnpm backend 在跑）
-    complete-check.ts      slash 命令补全的按键链路 4 项（events.dispatch 注入按键）
-    session-check.ts       会话落盘 / 读回 / 重放 / 记录器 24 项
+  （断言已迁至根 test/：vitest 四文件，见「验证」一节）
   probes/                一次性探针：摸清库行为 + 排版回归
     toolrow.ts / foldmark.ts / foldrule.ts / indent.ts / layout.ts / color.ts / codecolor.ts / complete.ts / promptdebug.ts / welcomedump.ts / session-seed.ts
   ui/                    界面层
@@ -237,7 +235,7 @@ src/
     config.ts / text.ts / theme.ts / syntax.ts / html.ts / brand.ts
 ```
 
-导入方向是单向的：`checks/probes/cli → ui → session → transcript → core`（`session/persist` 的重放依赖 transcript，transcript 依赖 core 的 theme/syntax），无反向依赖、无循环。`checks/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
+导入方向是单向的：`test/probes/cli → ui → session → transcript → core`（`session/persist` 的重放依赖 transcript，transcript 依赖 core 的 theme/syntax），无反向依赖、无循环。`test/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
 
 数据流：
 
@@ -268,10 +266,9 @@ pnpm backend
 pnpm dev -- --rpc         # 或 tui.toml 设 agent = "rpc"，或 TUI 里敲 /rpc
 
 # 3. 断言（协议级 + 无头端到端）
-pnpm config-test                                           # 配置 19 项
-cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 24 项（含 config/get）
-cd backend && ../backend/.venv/Scripts/python test_switch.py # 6 项
-pnpm rpc                                                  # 6 项（TUI↔后端真实链路）
+pnpm config-test        # pytest：配置 9 函数 23 断言
+pnpm test:backend       # pytest 全量 20 函数 53 断言（或 uv run pytest tests/test_rpc_protocol.py -q 只跑协议）
+pnpm rpc                # vitest：TUI↔后端真实链路 8 项
 ```
 
 协议（JSON-RPC 2.0 over WebSocket，**权威定义见 `backend/rpc_server.py` 模块 docstring**）：
@@ -293,7 +290,7 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 - **工具行服务端拼好再推**：`function_call` 的 `arguments` 是增量分片，服务端等
   `finish_reason=tool_calls` 拼完整、JSON 解析后才发 `tool_start`（带完整 params），
   客户端不做参数拼接——协议里跨 chunk 的状态留在产生它的地方。
-- **失败也是一等公民**：连不上 / 中途断开 → 转写里出现 `[RPC 错误] …`（rpc-check 用它做断言），
+- **失败也是一等公民**：连不上 / 中途断开 → 转写里出现 `[RPC 错误] …`（rpc.test 用它做断言），
   不会静默挂起。
 
 ------
@@ -352,13 +349,13 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|
-| `pnpm smoke` | mock 剧本的渲染链路 | 20 |
-| `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（需 `pnpm backend` 在跑） | 6 |
-| `pnpm complete` | slash 命令补全的按键注入链路（离线 mock） | 4 |
-| `pnpm config-test` | TOML 配置：三文件深合并 / 脱敏 / 坏文件回退 | 19 |
-| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/`config/get`（`uv run python test_rpc.py`） | 24 |
-| `backend/test_switch.py` | 协议级：会话切换/隔离/重连恢复（`uv run python test_switch.py`） | 6 |
-| `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（临时目录） | 24 |
+| `pnpm smoke` | mock 剧本的渲染链路（vitest） | 27 软断言 |
+| `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（vitest，需 `pnpm backend` 在跑） | 8 |
+| `pnpm complete` | slash 命令补全的按键注入链路（vitest，离线 mock） | 5 |
+| `pnpm config-test` | TOML 配置：三文件深合并 / 脱敏 / 坏文件回退（pytest） | 23 |
+| `backend/tests/test_rpc_*.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/`config/get`（pytest，拆 protocol 17 + agent 7） | 24 |
+| `backend/tests/test_switch.py` | 协议级：会话切换/隔离/重连恢复（pytest） | 6 |
+| `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（vitest，临时目录） | 24 |
 
 断言的是**事实**而不是「函数被调用过」。真实输出：
 

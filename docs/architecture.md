@@ -29,7 +29,7 @@
 │    cli/terminal.ts ── pnpm dev -- --rpc ──┐                      │
 │    ui/App.ts（命令/版面/落盘编排）    │                           │
 │    session/rpc.ts ──────────────────┼── AgentSession 接缝        │
-│    checks/rpc-check.ts（无头端到端）  │                           │
+│    test/rpc.test.ts（无头端到端）     │                           │
 │                                      │ JSON-RPC 2.0 over WebSocket│
 │  backend/  Agent 后端（Python）       │ ws://127.0.0.1:8765       │
 │    rpc_server.py ◀───────────────────┘                           │
@@ -37,7 +37,7 @@
 │      │    ├─ todo / 文件 / shell 工具循环（工作区=仓库/.agent-sandbox）│
 │      │    └─ FileHistoryProvider → backend/history/<sid>.jsonl    │
 │      ├─ provider 装配：wb2api(cn:hy3) 默认，openai 兼容可切换        │
-│      └─ test_rpc.py / test_switch.py（协议级断言）                 │
+│      └─ tests/（pytest：protocol/agent/switch/config）            │
 │                                                                  │
 │  docs/architecture.md（本文档）                                    │
 └──────────────────────────────────────────────────────────────────┘
@@ -46,7 +46,7 @@
               wb2api 127.0.0.1:7863 · cn:hy3
 ```
 
-分层职责（单向依赖，与现有 `checks → ui → session → transcript → core` 规则叠加）：
+分层职责（单向依赖，与现有 `test → ui → session → transcript → core` 规则叠加）：
 
 | 层 | 职责 | 禁止 |
 |---|---|---|
@@ -63,8 +63,10 @@ vue-tui-demo/
   backend/                # ★ 新增：唯一 agent 后端
     pyproject.toml        # uv 项目：agent-framework + websockets
     rpc_server.py         # 服务端 = 协议 docstring + 装配 + 分发（单文件，约 330 行）
-    test_rpc.py           # 协议级 11 项断言
-    test_switch.py        # 会话语义 6 项断言（切换/隔离/重启恢复）
+    tests/                # pytest（conftest + rpc_helpers + 四个 test_*.py）
+      test_rpc_protocol.py # 协议级 17 断言（握手/config/get/错误/model/mode）
+      test_rpc_agent.py    # agent 轮次 7 断言（流式/上下文/工具/cancel，真模型）
+      test_switch.py       # 会话语义 6 断言（切换/隔离/重启恢复）
     repro_cancel.py       # 取消路径的聚焦复现工具
     history/              # 运行时数据：每 session 一个 JSONL（gitignore）
     .venv/                # uv 环境（gitignore）
@@ -193,7 +195,7 @@ agent  = create_harness_agent(
 - ❌ 引入第二个后端进程或第二套会话存储。
 
 新增能力的验收口径（与现有套件同标准）：**协议级断言（backend test_*）+ 无头端到端断言
-（`src/checks/`）双侧都有，断言建立在真实字节/真实文件上，不接受"函数被调用过"。**
+（根 `test/` + `backend/tests/`）双侧都有，断言建立在真实字节/真实文件上，不接受"函数被调用过"。**
 
 ## 8. 配置（三份 TOML，Kimi Code 同款格式）
 
@@ -222,11 +224,12 @@ agent  = create_harness_agent(
 
 | 套件 | 覆盖 | 断言 | 结果 |
 |---|---|---|---|
-| `backend/test_rpc.py` | 握手/流式/跨轮上下文/工具事件/取消-32001/错误码 | 11 | **11/11** |
-| `backend/test_switch.py` | 会话切换/隔离/重连恢复 | 6 | **6/6** |
+| `backend/tests/test_rpc_*.py` | 握手/config/get/流式/跨轮上下文/工具事件/取消/错误码/model/mode（pytest） | 24 | **24/24** |
+| `backend/tests/test_switch.py` | 会话切换/隔离/重连恢复（pytest） | 6 | **6/6** |
 | `pnpm rpc` | TUI↔后端真实链路（真实模型） | 6 | **6/6** |
-| `pnpm smoke` | mock 渲染链路（回归，离线） | 20 | PASS |
-| `pnpm sessions` | 会话落盘/重放（回归） | 24 | **24/24** |
+| `pnpm smoke` | mock 渲染链路（vitest，回归，离线） | 27 | PASS |
+| `pnpm sessions` | 会话落盘/重放（vitest，回归） | 24 | **24/24** |
+| `pnpm test:backend` | pytest 全量（20 函数） | 53 | **53/53** |
 | `pnpm typecheck` | `tsc -p`（`src/probes/complete.ts` 的既有报错为仓库遗留，与本方向无关） | — | 本次改动 0 错 |
 
 ## 11. 迁移状态与待决策
