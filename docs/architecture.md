@@ -7,7 +7,7 @@
 
 ## 1. 背景与动机
 
-本仓库原本有四条会话实现（`src/agent/`）：`mock`（离线剧本）、`live`（裸 SSE 纯文本）、
+本仓库原本有四条会话实现（原 `src/agent/`，现 `src/session/`）：`mock`（离线剧本）、`live`（裸 SSE 纯文本）、
 `ai`（Vercel AI SDK 本地工具循环）、`rpc`（远端 agent 后端）。其中 `ai` 路把工具循环、
 历史管理、上下文恢复都写在 TypeScript 里，每加一个 agent 能力就要在 TS 侧重写一遍；
 且与 Python 生态（agent-framework 的 harness：计划/todo/压缩/工具审批/会话持久化）能力差距越拉越大。
@@ -28,7 +28,7 @@
 │  src/  TUI（TypeScript，纯客户端）                                │
 │    cli/terminal.ts ── VT_AGENT=rpc ──┐                           │
 │    ui/App.ts（命令/版面/落盘编排）    │                           │
-│    agent/rpcSession.ts ──────────────┼── AgentSession 接缝        │
+│    session/rpc.ts ──────────────────┼── AgentSession 接缝        │
 │    checks/rpc-check.ts（无头端到端）  │                           │
 │                                      │ JSON-RPC 2.0 over WebSocket│
 │  backend/  Agent 后端（Python）       │ ws://127.0.0.1:8765       │
@@ -46,7 +46,7 @@
               wb2api 127.0.0.1:7863 · cn:hy3
 ```
 
-分层职责（单向依赖，与现有 `checks → ui/agent → core` 规则叠加）：
+分层职责（单向依赖，与现有 `checks → ui → session → transcript → core` 规则叠加）：
 
 | 层 | 职责 | 禁止 |
 |---|---|---|

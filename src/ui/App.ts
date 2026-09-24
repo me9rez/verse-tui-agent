@@ -19,11 +19,11 @@ import { TInputBox, useTerminal } from '@simon_he/vue-tui/vue'
 import type { TerminalKeyboardEvent } from '@simon_he/vue-tui/runtime'
 import { layoutOf } from './layout.ts'
 import { HELP, HINT, NL, fitLine, stripControlChars } from './texts.ts'
-import { createTurnSink, type Phase } from './turn-sink.ts'
-import { createTranscriptStore, type TranscriptStore } from '../core/transcript/index.ts'
-import { createMockSession } from '../agent/mockSession.ts'
-import { createRpcSession } from '../agent/rpcSession.ts'
-import type { AgentSession } from '../agent/session.ts'
+import { createTurnSink, type Phase } from '../session/sink.ts'
+import { createTranscriptStore, type TranscriptStore } from '../transcript/index.ts'
+import { createMockSession } from '../session/mock.ts'
+import { createRpcSession } from '../session/rpc.ts'
+import type { AgentSession } from '../session/seam.ts'
 import { describeProvider, dotEnvResult } from '../core/env.ts'
 import { styles } from '../core/theme.ts'
 import { APP_NAME, HEADER_LABEL } from '../core/brand.ts'
@@ -39,9 +39,9 @@ import {
   titleFromPrompt,
   type SessionKind,
   type StoredSession,
-} from '../core/session/index.ts'
+} from '../session/persist/index.ts'
 
-export type { Phase } from './turn-sink.ts'
+export type { Phase } from '../session/sink.ts'
 
 export type AppApi = {
   submit(text: string): void

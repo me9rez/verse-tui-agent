@@ -1,8 +1,9 @@
 /**
- * 会话层：AgentSession 是「谁来产生流」的接缝。
- * - mockSession：本地剧本，自带节奏，离线可用（测试夹具）。
- * - rpcSession：唯一 agent 后端——py/Agent Framework 的 JSON-RPC over WebSocket（VT_AGENT=rpc）。
- *   （liveSession / aiSdkSession 已删除：agent 能力统一走 backend/，见 docs/architecture.md。）
+ * 会话域接缝：AgentSession 是「谁来产生流」的契约（本目录对外的类型出口）。
+ * - mock.ts：本地剧本，自带节奏，离线可用（测试夹具）。
+ * - rpc.ts：唯一 agent 后端——py/Agent Framework 的 JSON-RPC over WebSocket（VT_AGENT=rpc）。
+ * - sink.ts：TurnSink 实现（一轮对话的事件 → 转写分组），与接缝同域。
+ * - persist/：落盘会话（StoredSession 的存储/记录/重放，与运行时 AgentSession 是两回事）。
  */
 /** 真实子进程描述：ToolStep 带了它，输出就是真跑出来的 stdout。 */
 export type ToolRun = { file: string; args: string[]; cwd?: string }
@@ -45,7 +46,7 @@ export type TurnContext = {
   sleep: (ms: number) => Promise<void>
 }
 
-import type { SessionKind } from '../core/session/model.ts'
+import type { SessionKind } from './persist/model.ts'
 
 export type AgentSession = {
   readonly id: string

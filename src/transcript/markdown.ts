@@ -7,7 +7,7 @@
  */
 import type { Style } from '@simon_he/vue-tui/core'
 import type { TTranscriptSegment } from '@simon_he/vue-tui/agent'
-import { styles } from '../theme.ts'
+import { styles } from '../core/theme.ts'
 import type { Preset, Role } from './types.ts'
 
 export function inlineSegments(text: string, base: Style, codeStyle: Style): TTranscriptSegment[] {

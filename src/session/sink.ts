@@ -1,13 +1,13 @@
 /**
  * 一轮对话的事件映射：把会话层吐出的增量（思考/工具/正文）落到转写分组里，
- * 同时交给记录器攒成「按行」的结构（供持久化，见 core/session/recorder.ts）。
+ * 同时交给记录器攒成「按行」的结构（供持久化，见 session/persist/recorder.ts）。
  *
  * 从 App.ts 抽出来是因为这块状态最多（当前思考流、当前正文流、并发工具的组表），
  * 而且它只依赖 store 与「设置阶段」这个回调，跟渲染无关。
  */
-import type { AgentSession, ToolStep, TurnSink } from '../agent/session.ts'
-import type { Group, LineStream, ToolEntry, TranscriptStore } from '../core/transcript/index.ts'
-import { createTurnRecorder, type StoredTurn } from '../core/session/index.ts'
+import type { AgentSession, ToolStep, TurnSink } from '../session/seam.ts'
+import type { Group, LineStream, ToolEntry, TranscriptStore } from '../transcript/index.ts'
+import { createTurnRecorder, type StoredTurn } from '../session/persist/index.ts'
 
 export type Phase = 'idle' | 'thinking' | 'tool' | 'answering'
 

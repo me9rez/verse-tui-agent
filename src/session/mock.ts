@@ -8,7 +8,7 @@
  */
 import { spawn } from 'node:child_process'
 import { chunkText } from '../core/text.ts'
-import type { AgentSession, StreamStep, TurnContext } from './session.ts'
+import type { AgentSession, StreamStep, TurnContext } from './seam.ts'
 
 type RealCommand = { file: string; args: string[]; cwd?: string }
 
@@ -44,11 +44,11 @@ const SCENARIO_STREAM: StreamStep[] = [
     kind: 'tool',
     tool: {
       name: 'Read',
-      arg: 'src/core/transcript/store.ts',
-      params: { path: 'src/core/transcript/store.ts', offset: 96, limit: 14 },
+      arg: 'src/transcript/store.ts',
+      params: { path: 'src/transcript/store.ts', offset: 96, limit: 14 },
       output: [],
       status: 'ok',
-      run: readFileLines('src/core/transcript/store.ts', 96, 14),
+      run: readFileLines('src/transcript/store.ts', 96, 14),
     },
   },
   {
@@ -65,7 +65,7 @@ const SCENARIO_STREAM: StreamStep[] = [
   },
   {
     kind: 'answer',
-    text: `流式输出的关键就三步，都在 \`src/core/transcript/store.ts\` 里：
+    text: `流式输出的关键就三步，都在 \`src/transcript/store.ts\` 里：
 
 1. **会话层产出增量** —— mock 剧本按 2~3 个字符一块吐，\`chunkText()\` 保证不把换行切碎。
 2. **数据源按行累积** —— \`LineStream.push(delta)\` 每遇到一个换行符就「封行 + 开新行」，只改当前行的 \`text\` 并把这一行的 \`rev++\`。

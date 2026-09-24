@@ -8,7 +8,7 @@
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createTranscriptStore } from '../core/transcript/index.ts'
+import { createTranscriptStore } from '../transcript/index.ts'
 import {
   SESSION_SCHEMA_V,
   asStoredSession,
@@ -21,7 +21,7 @@ import {
   saveSession,
   titleFromPrompt,
   type StoredSession,
-} from '../core/session/index.ts'
+} from '../session/persist/index.ts'
 
 // ── 断言小工具（与 smoke.ts 同样的形状：名字 + 事实 + 细节）─────────────────
 const checks: Array<{ name: string; ok: boolean; detail: string }> = []
@@ -136,8 +136,8 @@ section('重放', () => {
       tools: [
         {
           name: 'read_file',
-          arg: 'src/core/transcript/store.ts',
-          params: { path: 'src/core/transcript/store.ts', offset: 96 },
+          arg: 'src/transcript/store.ts',
+          params: { path: 'src/transcript/store.ts', offset: 96 },
           status: 'ok' as const,
           out: ['102|       this.commit(line)', '103|     }'],
         },
@@ -146,7 +146,7 @@ section('重放', () => {
           arg: 'node -e "统计行数"',
           params: { command: 'node -e "…"' },
           status: 'ok' as const,
-          out: ['96  src/agent/rpcSession.ts'],
+          out: ['96  src/session/rpc.ts'],
         },
       ],
       answer: [
@@ -159,7 +159,7 @@ section('重放', () => {
         '```',
       ],
     },
-    { user: '那折叠呢？', thinking: ['手风琴规则在 turn-sink。'], tools: [], answer: ['一轮里只有当前组展开。'], aborted: true },
+    { user: '那折叠呢？', thinking: ['手风琴规则在 session/sink.ts。'], tools: [], answer: ['一轮里只有当前组展开。'], aborted: true },
   ]
   const session = makeSession('20260918-150000-dddd', { turns })
 

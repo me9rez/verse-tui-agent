@@ -2,8 +2,8 @@
  * RPC 会话：WebSocket + JSON-RPC 2.0 连远端 harness agent 后端（rpc_server.py）。
  *
  * 这是 AgentSession 接缝的 agent 后端实现（唯一）：
- *   mockSession  —— 本地剧本（离线测试夹具，非 agent 后端）
- *   rpcSession   —— 把整轮对话交给远端 harness（本文件），工具/计划/历史都在服务端。
+ *   mock.ts   —— 本地剧本（离线测试夹具，非 agent 后端）
+ *   rpc.ts    —— 把整轮对话交给远端 harness（本文件），工具/计划/历史都在服务端。
  *     原 liveSession / aiSdkSession 已删除：agent 能力统一在 py 后端用 Agent Framework 开发。
  *
  * 协议（与 rpc_server.py 的 docstring 一致）：
@@ -17,7 +17,7 @@
  * 会话历史在服务端 FileHistoryProvider（每 session 一个 JSONL）；
  * snapshot() 只存服务端 session id，恢复时拿它接回同一份磁盘历史。
  */
-import type { AgentSession, ToolStep, TurnContext } from './session.ts'
+import type { AgentSession, ToolStep, TurnContext } from './seam.ts'
 
 export type RpcOptions = {
   /** 后端地址，默认 ws://127.0.0.1:8765（也可用 VT_RPC_URL） */

@@ -3,7 +3,7 @@
  *
  *   VT_SESSION_DIR=$LOCALAPPDATA/Temp/vs-demo node src/probes/session-seed.ts
  */
-import { saveSession, sessionDir } from '../core/session/index.ts'
+import { saveSession, sessionDir } from '../session/persist/index.ts'
 
 const now = new Date().toISOString()
 const path = saveSession({

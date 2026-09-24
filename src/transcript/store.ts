@@ -9,9 +9,9 @@
 import { ref } from 'vue'
 import type { Style } from '@simon_he/vue-tui/core'
 import type { TTranscriptDataSource, TTranscriptRow } from '@simon_he/vue-tui/agent'
-import { styles } from '../theme.ts'
+import { styles } from '../core/theme.ts'
 import { formatParams } from './markdown.ts'
-import { langOf, type Lang } from '../syntax.ts'
+import { langOf, type Lang } from '../core/syntax.ts'
 import { toLineRow, toToolRow } from './rows.ts'
 import type { Entry, Group, GroupKind, LineEntry, Preset, Role, ToolEntry, ToolStatus } from './types.ts'
 
@@ -266,7 +266,7 @@ export class TranscriptStore implements TTranscriptDataSource {
   /**
    * 手风琴：只留 keepId 这个组展开，其余全部收起（不传 keepId 则全收起）。
    *
-   * 一轮进行中由 turn-sink 调用，实现「正在写的那块展开、前面的一律收起」；
+   * 一轮进行中由 session/sink 调用，实现「正在写的那块展开、前面的一律收起」；
    * 一轮结束（或正文开始流式输出时）也用同一入口把全部收起。
    */
   soloExpand(keepId?: string): void {

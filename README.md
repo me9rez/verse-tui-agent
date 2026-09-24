@@ -107,7 +107,7 @@ agent 工作区  <repo>/.agent-sandbox
 |---|---|---|
 | 用户消息 / 正文 / 分组头部 | 0 | `> 问题` · `▾ ● Bash(...)  · ok` · `▸ ✻ Thinking  · 2 行已折叠` |
 | 组内 section | 2 | `params` · `out` |
-| section 的值行 | 4 | `command: dir /b` · `357  src/agent/rpcSession.ts` |
+| section 的值行 | 4 | `command: dir /b` · `357  src/session/rpc.ts` |
 
 留白：每个块（用户消息 / 思考组 / 工具组 / 正文 / 提示）开始前插**一行空行**，由 `store.blank()` 统一处理 —— 它只在「上一行不是空行」时插入，所以不会出现连续空行。这一条是观感的关键。
 
@@ -123,7 +123,7 @@ agent 工作区  <repo>/.agent-sandbox
 
 ```
 ▸ ✻ Thinking  · 2 行已折叠
-▸ ● Read(src/core/transcript/store.ts)  · ok  · 19 行已折叠
+▸ ● Read(src/transcript/store.ts)  · ok  · 19 行已折叠
 ▸ ● Bash(node -e "统计 src 下各文件行数")  · ok  · 34 行已折叠
 ```
 
@@ -143,13 +143,13 @@ agent 工作区  <repo>/.agent-sandbox
     command: node -e "<walk src/*.ts and count lines>"
     timeout_ms: 20000
   out
-    96  src/agent/rpcSession.ts
+    96  src/session/rpc.ts
     ...
 ```
 
 **折叠规则（手风琴）**：一轮进行中只有**正在写的那块**展开，它一出现前面的组就自动收起；正文开始流式输出时（此时没有「当前组」）全部收起；**一轮结束（含 Esc 中断）后全部收起**。想细看就点标题或 `Ctrl+T`（最近一组）/ `Ctrl+O`（全部折叠或展开）。
 
-规则落在两处：`store.soloExpand(keepId?)`（只留一个展开，或全部收起）与 `src/ui/turn-sink.ts` 里的四处调用——新建思考组 / 新建工具组 / 正文开始 / 回合收尾。想改回「工具组保持展开」，把 `finish()` 里那行 `store.soloExpand()` 删掉即可。
+规则落在两处：`store.soloExpand(keepId?)`（只留一个展开，或全部收起）与 `src/session/sink.ts` 里的四处调用——新建思考组 / 新建工具组 / 正文开始 / 回合收尾。想改回「工具组保持展开」，把 `finish()` 里那行 `store.soloExpand()` 删掉即可。
 
 轨迹可以用探针一眼看全：
 
@@ -217,28 +217,30 @@ src/
     smoke.ts               渲染 / 流式 / 折叠 / 颜色 20 项（离线 mock）
     env-check.ts           .env 加载行为 9 项（优先级 / 覆盖 / 坏行 / 不外泄）
     rpc-check.ts           WebSocket JSON-RPC 后端 6 项（需 pnpm backend 在跑）
+    session-check.ts       会话落盘 / 读回 / 重放 / 记录器 24 项
   probes/                一次性探针：摸清库行为 + 排版回归
-    toolrow.ts / foldmark.ts / indent.ts / layout.ts / debug-agent.ts
+    toolrow.ts / foldmark.ts / foldrule.ts / indent.ts / layout.ts / color.ts / codecolor.ts / complete.ts / session-seed.ts
   ui/                    界面层
     App.ts                 组件装配：版面、命令、键盘、对外 AppApi
     layout.ts              版面坐标（layoutOf）
     texts.ts               命令帮助、提示栏、状态行对齐、输入清洗
-    turn-sink.ts           一轮对话的事件映射（思考 / 工具 / 正文 → 分组）
-  core/                  底座（与界面、会话无关）
-    transcript/
-      types.ts               行 / 分组的类型（叶子模块，无依赖）
-      markdown.ts            行级 markdown 与参数格式化（纯函数）
-      rows.ts                entry → TTranscriptRow（缩进、折叠标记）
-      store.ts               LineStream + TranscriptStore（分组、可见行过滤、版本号）
-      index.ts               对外桶文件
-    env.ts / text.ts / theme.ts / html.ts
-  agent/                 会话层（同一接缝的多个实现）
-    session.ts             接缝类型（AgentSession / StreamStep / ToolStep / TurnSink）
-    mockSession.ts         本地剧本（工具步骤真的起子进程）
-    rpcSession.ts          唯一 agent 后端客户端（WebSocket + JSON-RPC 2.0）
+  session/               会话域（接缝 + 实现 + 落盘，一个概念一个目录）
+    seam.ts                接缝类型（AgentSession / StreamStep / ToolStep / TurnSink）
+    mock.ts                本地剧本（工具步骤真的起子进程）
+    rpc.ts                 唯一 agent 后端客户端（WebSocket + JSON-RPC 2.0）
+    sink.ts                TurnSink 实现：一轮对话的事件 → 转写分组
+    persist/               落盘会话（model · store · recorder · replay）
+  transcript/            转写域（entry → 可见行）
+    types.ts               行 / 分组的类型（叶子模块，无依赖）
+    markdown.ts            行级 markdown 与参数格式化（纯函数）
+    rows.ts                entry → TTranscriptRow（缩进、折叠标记）
+    store.ts               LineStream + TranscriptStore（分组、可见行过滤、版本号）
+    index.ts               对外桶文件
+  core/                  与界面/会话无关的底座
+    env.ts / text.ts / theme.ts / syntax.ts / html.ts / brand.ts
 ```
 
-导入方向是单向的：`cli/checks/probes → ui/agent → core`，core 内部 `store → rows → markdown → types`，无反向依赖、无循环。`checks/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
+导入方向是单向的：`checks/probes/cli → ui → session → transcript → core`（`session/persist` 的重放依赖 transcript，transcript 依赖 core 的 theme/syntax），无反向依赖、无循环。`checks/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
 
 数据流：
 
@@ -361,7 +363,7 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 ✔ 思考与每次工具调用各自成组 — 3 个分组（1 个 thinking + 2 个 tool）
 ✔ 流式中只展开当前组（手风琴） — 采样 224 次，展开组数最大值 1（期望 ≤ 1）
 ✔ 回合结束后分组全部收起 — 3 个分组，收起 3 个
-✔ 工具调用显示了参数 — 展开态工具组含 params 块：path: src/core/transcript/store.ts
+✔ 工具调用显示了参数 — 展开态工具组含 params 块：path: src/transcript/store.ts
 ✔ 折叠真的隐藏了内容行 — 可见行 88 → 29；折叠后仍能读到「合计」= false
 ✔ 展开真的恢复内容行 — 可见行 29 → 88（展开基线经显式展开取得，往返无损）
 ✔ 代码块按语言上色 — 5 行代码，合计 5 种前景色：#c9d1f2 #7fb3ff #c678dd #56b6c2 #6f7480

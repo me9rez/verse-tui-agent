@@ -3,9 +3,9 @@
  * 缩进与折叠标记都在这里决定（库不给默认缩进，实测三种 role 都是 0）。
  */
 import type { TTranscriptRow, TTranscriptSegment } from '@simon_he/vue-tui/agent'
-import { styles, toolHeaderStyle } from '../theme.ts'
+import { styles, toolHeaderStyle } from '../core/theme.ts'
 import { inlineSegments, presetBase } from './markdown.ts'
-import { highlightLine, paramParts } from '../syntax.ts'
+import { highlightLine, paramParts } from '../core/syntax.ts'
 import type { Group, LineEntry, ToolEntry } from './types.ts'
 
 export function toLineRow(entry: LineEntry, group: Group | undefined): TTranscriptRow {

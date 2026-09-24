@@ -17,7 +17,7 @@ import {
 import { App, type AppApi } from '../ui/App.ts'
 import { rendererPalette, styles } from '../core/theme.ts'
 import { loadDotEnv } from '../core/env.ts'
-import { listSessions, sessionDir } from '../core/session/index.ts'
+import { listSessions, sessionDir } from '../session/persist/index.ts'
 import { formatStamp } from '../core/text.ts'
 
 // .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）

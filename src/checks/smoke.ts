@@ -13,7 +13,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listSessions, loadSession } from '../core/session/index.ts'
+import { listSessions, loadSession } from '../session/persist/index.ts'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
@@ -166,7 +166,7 @@ check(
 )
 check(
   '工具输出是真实子进程',
-  storeText().includes('src/core/transcript/store.ts') && /合计 \d+ 个文件/.test(storeText()),
+  storeText().includes('src/transcript/store.ts') && /合计 \d+ 个文件/.test(storeText()),
   '含 Read 的真实源码行与行数统计（由子进程 stdout 流式读入）',
 )
 check('工具结果状态正确', firstState.tools >= 2, `统计到 ${firstState.tools} 个工具调用`)
