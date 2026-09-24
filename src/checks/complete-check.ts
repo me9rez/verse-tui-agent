@@ -7,7 +7,8 @@
  *   1. 输入 '/' 弹出命令补全（判别用欢迎块 Tips 没有的 desc：/clear、/fold）
  *   2. 继续输入 '/fo' 收窄匹配（/clear 的 detail 消失，/fold 仍在）
  *   3. 第一次 Enter = 采用建议而非提交（弹窗收起，转写里还没有 /fold 执行记录）
- *   4. 第二次 Enter = 真提交（/fold 的「…全部分组」note 进入转写）
+ *   4. 第二次 Enter = 真提交（/fold 的「…全部分组」note 进入转写，输入框清空）
+ *   5. Shift+Tab 快捷键：mock 下提示「没有 harness 模式」
  *
  * 与 smoke 一样 VT_NO_PERSIST=1：不往仓库 .verse-sessions/ 写测试会话。
  */
@@ -120,6 +121,15 @@ const s4 = screen()
 const submitted = s4.includes('全部分组') && storeText().includes('全部分组')
 check('/fold 被真正执行', submitted, submitted ? '/fold 的「…全部分组」note 出现在转写' : '没等到执行记录')
 
+// 5. Shift+Tab：mock 没有 harness 模式 → 提示落到转写（真实 plan/execute 切换在 rpc-check / test_rpc 断言）
+key('BackTab')
+await sleep(150)
+check(
+  'Shift+Tab 在 mock 下给出提示',
+  storeText().includes('mock 是离线剧本，没有 harness 模式'),
+  'BackTab 事件经 onKey 路由到模式切换，mock 分支提示可见',
+)
+
 const failures = checks.filter((c) => !c.ok)
 mkdirSync('.artifacts', { recursive: true })
 writeFileSync('.artifacts/complete-screen.txt', `${s4}\n`, 'utf8')
@@ -140,5 +150,5 @@ writeFileSync(
 for (const c of checks) console.log(`${c.ok ? '✔' : '✘'} ${c.name} — ${c.detail}`)
 console.log('\n屏幕快照（含弹窗/输入框/转写尾部）：\n')
 console.log(s4.split('\n').filter((l) => l.trim()).slice(-20).join('\n'))
-console.log(failures.length ? `\nFAIL: ${failures.length} 项未通过` : '\nPASS: slash 命令补全链路全部通过')
+console.log(failures.length ? `\nFAIL: ${failures.length} 项未通过` : '\nPASS: 补全与快捷键链路全部通过')
 process.exit(failures.length ? 1 : 0)

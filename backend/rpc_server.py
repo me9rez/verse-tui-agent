@@ -23,6 +23,15 @@ JSON-RPC 2.0 over WebSocket 协议
         影响后续所有轮次）；plan/todos 随 harness 重建重置，磁盘历史不受影响。
         有轮次在跑时拒绝（-32003）；空 model → -32602。
         initialize.result.model 是当前 model 的权威回显，客户端据此显示。
+  {"jsonrpc":"2.0","id":8,"method":"mode/get","params":{"session":"<sid>"}}
+      → 应答 {"result":{"session":"<sid>","mode":"plan"|"execute"}}
+  {"jsonrpc":"2.0","id":9,"method":"mode/set","params":{"session":"<sid>","mode":"plan"|"execute"}}
+      → 应答 {"result":{"session","mode","previous","changed","notify"}}
+      → 语义：harness 的 plan/execute 模式，按会话隔离（AgentModeProvider，state["agent_mode"]，
+        默认 plan）。plan = 规划/澄清/求批准，execute = 动手执行——指令级切换，
+        下一轮生效；changed=true 时框架自动往下一轮注入 [Mode changed] 通知。
+        同值切换 changed=false 且不发通知；非法 mode → -32602；空参数 → -32602。
+        依赖服务端会话对象复用（_SESSION_CACHE）；进程重启后模式回到默认。
   {"jsonrpc":"2.0","id":3,"method":"initialize"} / {"method":"ping"}
 
 服务端 → 客户端（一轮进行中的流式事件，通知，无 id）：
@@ -73,7 +82,7 @@ from typing import Any
 import websockets
 from websockets.asyncio.server import serve
 
-from agent_framework import FileHistoryProvider, create_harness_agent
+from agent_framework import FileHistoryProvider, create_harness_agent, get_agent_mode, set_agent_mode
 
 HERE = Path(__file__).resolve().parent
 HOST = os.environ.get("AGENT_RPC_HOST", "127.0.0.1")
@@ -161,9 +170,26 @@ def _event(session: str, ev: dict[str, Any]) -> dict[str, Any]:
             "params": {"session": session, "event": ev}}
 
 
+# ── 会话对象复用（plan/todos/mode 跨轮持久的地基）─────────────────────
+# 源码事实：AgentSession 只是 {session_id, state} 轻量容器，run() 不会从任何 store
+# 里自动水合 state——每轮 new 一个会话对象，provider state（Todo/plan/agent_mode）
+# 每轮都会清零。这里按 sid 复用同一个对象，harness 才能跨轮记住状态（与官方
+# Harness 文档「keep an AgentSession」一致）。内存级：进程重启即丢；
+# 对话历史另有 FileHistoryProvider JSONL，不受影响。
+_SESSION_CACHE: dict[str, Any] = {}
+
+
+def _get_session(sid: str):
+    sess = _SESSION_CACHE.get(sid)
+    if sess is None:
+        sess = agent.create_session(session_id=sid)
+        _SESSION_CACHE[sid] = sess
+    return sess
+
+
 async def _stream_turn(ws, session: str, prompt: str, send_lock) -> dict[str, Any]:
     """跑一轮 harness，把每个 AgentResponseUpdate 转成事件。返回 result 对象。"""
-    sess = agent.create_session(session_id=session)
+    sess = _get_session(session)
 
     answer: list[str] = []
     usage: dict[str, Any] | None = None
@@ -318,6 +344,7 @@ async def handler(ws) -> None:
                 sid = str(params.get("session") or "")
                 if sid in agent._sessions:
                     agent._sessions.pop(sid, None)
+                _SESSION_CACHE.pop(sid, None)
                 if rid is not None:
                     await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid,
                                                 "result": {"reset": True}})
@@ -327,7 +354,8 @@ async def handler(ws) -> None:
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
                     "server": "verse-agent-backend", "version": "1.0.0",
                     "provider": PROVIDER, "model": MODEL,
-                    "methods": ["initialize", "ping", "agent/chat", "agent/cancel", "agent/reset", "model/set"]}})
+                    "methods": ["initialize", "ping", "agent/chat", "agent/cancel", "agent/reset",
+                                "model/set", "mode/get", "mode/set"]}})
             elif method == "model/set":                    # 切服务端默认模型（重建 client+harness）
                 new_model = str(params.get("model") or "").strip()
                 if not new_model:
@@ -338,9 +366,39 @@ async def handler(ws) -> None:
                 else:
                     MODEL = new_model
                     client, agent = _build_agent(MODEL)
-                    log.info("model 切换为 %s（harness 已重建，plan/todos 重置，磁盘历史保留）", MODEL)
+                    _SESSION_CACHE.clear()   # 旧会话对象的 provider state 归属旧 agent，一并丢弃
+                    log.info("model 切换为 %s（harness 已重建，plan/todos/mode 重置，磁盘历史保留）", MODEL)
                     await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
                         "model": MODEL, "provider": PROVIDER, "rebuilt": True}})
+            elif method == "mode/get":                     # 读该会话的 harness 模式（默认 plan）
+                sid = str(params.get("session") or "")
+                sess = _get_session(sid)
+                await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                    "session": sid, "mode": get_agent_mode(sess)}})
+            elif method == "mode/set":                     # 切该会话的 plan/execute 模式
+                sid = str(params.get("session") or "").strip()
+                mode = str(params.get("mode") or "").strip()
+                if not sid or not mode:
+                    await _send(ws, send_lock, _err(rid, -32602,
+                                                    "params.session 与 params.mode 必须是非空字符串"))
+                else:
+                    sess = _get_session(sid)
+                    previous = get_agent_mode(sess)
+                    if mode == previous:
+                        # 同值不重发通知：set_agent_mode(notify) 会往下一轮注入 Mode changed 消息
+                        await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                            "session": sid, "mode": mode, "previous": previous,
+                            "changed": False, "notify": False}})
+                    else:
+                        try:
+                            set_agent_mode(sess, mode)     # 非法值抛 ValueError → -32602
+                        except ValueError as exc:
+                            await _send(ws, send_lock, _err(rid, -32602, f"非法 mode: {exc}"))
+                        else:
+                            log.info("会话 %s 模式切换 %s → %s（下一轮生效）", sid, previous, mode)
+                            await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                                "session": sid, "mode": mode, "previous": previous,
+                                "changed": True, "notify": True}})
             elif method == "ping":
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid,
                                             "result": {"pong": True}})

@@ -24,6 +24,7 @@ import { createTranscriptStore, type TranscriptStore } from '../transcript/index
 import { createMockSession } from '../session/mock.ts'
 import { createRpcSession } from '../session/rpc.ts'
 import { onBackendModel } from '../session/model.ts'
+import { onBackendMode } from '../session/mode.ts'
 import type { AgentSession } from '../session/seam.ts'
 import { describeProvider, dotEnvResult } from '../core/env.ts'
 import { styles } from '../core/theme.ts'
@@ -122,6 +123,39 @@ export const App = defineComponent({
         ? backendModel.value || process.env.VT_RPC_MODEL || '连接后端中…'
         : '离线剧本',
     )
+
+    /** harness 模式（plan/execute）：mode/get 回填 + Shift+Tab 切换后更新 */
+    const harnessMode = ref('')
+    onBackendMode((m) => {
+      harnessMode.value = m
+    })
+
+    /** Shift+Tab：plan ↔ execute。切换目标取自后端回填的当前值（没握手过按默认 plan）。 */
+    async function toggleHarnessMode(): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote('mock 是离线剧本，没有 harness 模式；/rpc 切到后端后用 Shift+Tab 切换 plan/execute。')
+        return
+      }
+      if (ui.streaming) {
+        store.addNote('⚠ 本轮还在跑，结束再切模式。')
+        return
+      }
+      const target = harnessMode.value === 'execute' ? 'plan' : 'execute'
+      try {
+        const next = await sessionRef.value.setMode?.(target)
+        if (!next) {
+          store.addNote('后端不支持 mode/set（需要更新 rpc_server.py）。')
+          return
+        }
+        store.addNote(
+          next === 'plan'
+            ? '已切换到 plan 模式：只做规划/澄清、请求批准后再执行（状态栏可见，下一轮生效）。'
+            : '已切换到 execute 模式：harness 自主执行（下一轮生效，[Mode changed] 通知会注入该轮）。',
+        )
+      } catch (err) {
+        store.addNote(`切换模式失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
 
     // ── 持久会话 ──────────────────────────────────────────────────────────
     /** VT_NO_PERSIST=1 时完全不动磁盘（逃生门） */
@@ -398,6 +432,18 @@ export const App = defineComponent({
         ui.aborted = true
         return
       }
+      // Shift+Tab：切 harness 的 plan/execute 模式（终端把 \x1b[Z 报成 BackTab；
+      // 合成事件可能给 Tab+shiftKey，两种都接）。放在输入框 Tab(采用补全)之前没冲突：
+      // 补全弹窗打开时 Tab 带 shift 同样视为切模式。
+      if (
+        event.key === 'BackTab' ||
+        event.key === 'ISO_Left_Tab' ||
+        ((event.key === 'Tab' || event.key === '\t') && event.shiftKey)
+      ) {
+        event.preventDefault()
+        void toggleHarnessMode()
+        return
+      }
       if (event.key === 'End' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault()
         transcriptRef.value?.scrollToBottom?.()
@@ -445,6 +491,16 @@ export const App = defineComponent({
         { text: `${phaseText.value}${ui.streaming ? '  (Esc 中断)' : ''}`, style: ui.streaming ? styles.statusActive : styles.statusOk },
         { text: ' · ', style: styles.faint },
         { text: mode, style: styles.tipCmd },
+        // harness 模式段（仅 rpc）：plan 高亮提醒「只规划不动手」，execute 用普通蓝
+        ...(mode === 'rpc' && harnessMode.value
+          ? [
+              { text: ' · ', style: styles.faint },
+              {
+                text: harnessMode.value,
+                style: harnessMode.value === 'plan' ? styles.statusActive : styles.tipCmd,
+              },
+            ]
+          : []),
         { text: ' · ', style: styles.faint },
         { text: model, style: styles.infoValue },
         { text: ' · ', style: styles.faint },

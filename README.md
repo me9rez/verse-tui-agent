@@ -97,6 +97,7 @@ agent 工作区  <repo>/.agent-sandbox
 | **点标题** | 鼠标点分组标题也能折叠 / 展开（库画 ▸/▾ 并带命中区） |
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
 | **输入 `/`** | **命令自动补全**：↑↓ 选择 · Enter/Tab 采用（再按 Enter 发送）· 模糊匹配、与 `/help` 同一张命令表 |
+| **Shift+Tab** | **切 harness 模式 plan ↔ execute**（仅 rpc；状态栏独立模式段显示当前值，plan 高亮；mock 提示不支持） |
 | 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model <id>`（查看/切换后端模型） `/exit` |
 | 会话 | `/sessions` 列表（▶ = 当前）· `/open <序号\|id>` 切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
@@ -275,7 +276,7 @@ pnpm backend
 VT_AGENT=rpc pnpm dev        # 或 TUI 里敲 /rpc
 
 # 3. 断言（协议级 + 无头端到端）
-cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 15 项
+cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 21 项
 cd backend && ../backend/.venv/Scripts/python test_switch.py # 6 项
 pnpm rpc                                                  # 6 项（TUI↔后端真实链路）
 ```
@@ -361,7 +362,7 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 | `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 20 + 9 = 29 |
 | `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（需 `pnpm backend` 在跑） | 6 |
 | `pnpm complete` | slash 命令补全的按键注入链路（离线 mock） | 4 |
-| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换（`uv run python test_rpc.py`） | 15 |
+| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换（`uv run python test_rpc.py`） | 21 |
 | `backend/test_switch.py` | 协议级：会话切换/隔离/重连恢复（`uv run python test_switch.py`） | 6 |
 | `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（临时目录） | 24 |
 

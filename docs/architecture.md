@@ -92,6 +92,8 @@ VT_AGENT=rpc pnpm dev     # TUI 接上；或进 TUI 后敲 /rpc
 | `agent/cancel` | 请求 | 取消该 session 进行中的轮次；应答 `{cancelled:bool}`；被取消的 chat 另收 `-32001` |
 | `agent/reset` | 请求 | 丢弃服务端内存会话对象（磁盘历史保留） |
 | `model/set` | 请求 | 切服务端默认模型 = 重建 chat client + harness（plan/todos 重置、磁盘历史保留）；`{model,provider,rebuilt}`；轮次进行中拒绝 `-32003`、空值 `-32602`。客户端显示的 model 以 `initialize.result.model` 为权威，连上即握手回填 |
+| `mode/get` | 请求 | 读该会话 harness 模式 `{session,mode}`（plan\|execute，默认 plan；AgentModeProvider，`state["agent_mode"]`） |
+| `mode/set` | 请求 | 切该会话 plan/execute `{session,mode}` → `{mode,previous,changed,notify}`；指令级切换下一轮生效，changed=true 时框架注入 `[Mode changed]` 通知；同值不重发、非法值/空参数 `-32602`。UI 经 Shift+Tab 触发，状态栏独立模式段显示 |
 | `initialize` / `ping` | 请求 | 能力发现 / 存活探测 |
 
 ### 4.2 事件（`agent/event` 通知，无 id）

@@ -8,6 +8,7 @@
   5. agent/cancel 能掐掉一轮
   6. 错误路径：method not found、坏 prompt
   7. model：initialize 权威回显、model/set 切换跟随、空值 -32602
+  8. mode：plan/execute 默认值、切换与持久、同值不重发、非法值 -32602
 
 跑法：先起 rpc_server.py，再 python test_rpc.py
 """
@@ -162,6 +163,26 @@ async def main() -> int:
         check("空 model → -32602", r.get("error", {}).get("code") == -32602, str(r.get("error")))
         # 切回原值，不污染后续手工验证
         await rpc.call("model/set", {"model": orig_model})
+
+        # 8. mode：harness 的 plan/execute 模式（会话对象复用后跨调用持久）
+        r = await rpc.call("mode/get", {"session": SID})
+        check("mode/get 默认 plan", r.get("result", {}).get("mode") == "plan", str(r.get("result")))
+        r = await rpc.call("mode/set", {"session": SID, "mode": "execute"})
+        res = r.get("result", {})
+        check(
+            "mode/set → execute（带变更通知）",
+            res.get("mode") == "execute" and res.get("previous") == "plan" and res.get("notify") is True,
+            str(res or r.get("error")),
+        )
+        r = await rpc.call("mode/get", {"session": SID})
+        check("模式跨调用持久（会话对象复用）", r.get("result", {}).get("mode") == "execute", str(r.get("result")))
+        r = await rpc.call("mode/set", {"session": SID, "mode": "execute"})
+        check("同值切换 changed=false 不重发通知", r.get("result", {}).get("changed") is False, str(r.get("result")))
+        r = await rpc.call("mode/set", {"session": SID, "mode": "fly"})
+        check("非法 mode → -32602", r.get("error", {}).get("code") == -32602, str(r.get("error")))
+        r = await rpc.call("mode/set", {"session": SID, "mode": "plan"})
+        check("切回 plan", r.get("result", {}).get("mode") == "plan" and r.get("result", {}).get("changed") is True,
+              str(r.get("result")))
 
     fails = [c for c in checks if not c[1]]
     print(f"\n{'FAIL' if fails else 'PASS'}: {len(checks) - len(fails)}/{len(checks)} 通过")

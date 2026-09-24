@@ -19,6 +19,7 @@
  */
 import type { AgentSession, ToolStep, TurnContext } from './seam.ts'
 import { setBackendModel } from './model.ts'
+import { setBackendMode } from './mode.ts'
 
 export type RpcOptions = {
   /** 后端地址，默认 ws://127.0.0.1:8765（也可用 VT_RPC_URL） */
@@ -141,13 +142,14 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
         clearTimeout(timer)
         ws = sock
         resolve(sock)
-        // 握手：回显 server/provider/model；model 回填给 UI（欢迎块/状态栏）
+        // 握手：回显 server/provider/model；model + harness 模式回填给 UI（欢迎块/状态栏）
         rpcCall(sock, 'initialize')
           .then((r) => {
             const m = (r as { model?: unknown } | null)?.model
             if (typeof m === 'string' && m) setBackendModel(m)
           })
           .catch(() => {})
+        refreshMode(sock)
       }
       sock.onmessage = (msg: MessageEvent) => handleMessage(String(msg.data))
       sock.onerror = () => {
@@ -184,9 +186,21 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
     return p
   }
 
-  // 连上就握手一次：initialize.result.model 是后端 model 的权威值，回填给 UI 显示。
+  // 连上就握手一次：initialize.result.model 回填 model，mode/get 回填 plan/execute 模式。
   // 启动即连（懒连接会让欢迎块只看到环境变量兜底）；失败静默，首轮 respond 会再连。
   void ensureSocket().then(undefined, () => {})
+
+  /** mode/get：结果按 session 归属过滤——sid 在 restore() 里可能已换，旧 sid 的应答丢弃。 */
+  function refreshMode(sock: WebSocket): void {
+    const sidAtCall = serverSid
+    rpcCall(sock, 'mode/get', { session: sidAtCall })
+      .then((r) => {
+        const resp = r as { session?: unknown; mode?: unknown } | null
+        if (resp?.session !== sidAtCall || sidAtCall !== serverSid) return
+        if (typeof resp.mode === 'string' && resp.mode) setBackendMode(resp.mode)
+      })
+      .catch(() => {})
+  }
 
   return {
     id: 'rpc',
@@ -198,7 +212,11 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
     },
     restore(state: unknown): void {
       const sid = (state as { sid?: unknown } | null)?.sid
-      if (typeof sid === 'string' && sid) serverSid = sid
+      if (typeof sid === 'string' && sid && sid !== serverSid) {
+        serverSid = sid
+        // 换了会话：模式按 session 隔离，已连接就重问一次（未连接则由 onopen 的握手兜底）
+        if (ws && ws.readyState === WebSocket.OPEN) refreshMode(ws)
+      }
     },
 
     async respond(prompt: string, ctx: TurnContext): Promise<void> {
@@ -248,6 +266,15 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
       const r = (await rpcCall(sock, 'model/set', { model: id })) as { model?: unknown } | null
       const next = typeof r?.model === 'string' && r.model ? r.model : id
       setBackendModel(next)
+      return next
+    },
+
+    /** Shift+Tab：mode/set → 回填模式信号，返回切换后的模式 */
+    async setMode(mode: string): Promise<string> {
+      const sock = await ensureSocket()
+      const r = (await rpcCall(sock, 'mode/set', { session: serverSid, mode })) as { mode?: unknown } | null
+      const next = typeof r?.mode === 'string' && r.mode ? r.mode : mode
+      setBackendMode(next)
       return next
     },
   }

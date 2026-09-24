@@ -50,7 +50,7 @@ export function stripControlChars(value: string): string {
     .join('')
 }
 
-export const PLACEHOLDER = '问点什么（/ 补全命令 · Enter 发送 · Esc 中断）'
+export const PLACEHOLDER = '问点什么（/ 补全命令 · Shift+Tab 切 plan/exec · Enter 发送 · Esc 中断）'
 export const EMPTY_NOTE = '输入第一条消息，开始新会话。'
 
 /** 左文 + 右文，按列宽对齐（右文贴右边，左文不够长就补空格）。 */

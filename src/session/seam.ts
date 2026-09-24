@@ -57,6 +57,8 @@ export type AgentSession = {
   respond(prompt: string, ctx: TurnContext): Promise<void>
   /** 切换后端模型（/model <id>）：返回后端确认的 model id；不支持的后端（mock）不实现 */
   setModel?(id: string): Promise<string>
+  /** 切 harness 模式（Shift+Tab）：返回切换后的模式；同值切换不重复通知 */
+  setMode?(mode: string): Promise<string>
   /** 把「与服务端上下文有关的状态」导出成可 JSON 化的值（没有就返回 undefined） */
   snapshot?(): unknown
   /** 从 snapshot() 的产物恢复；坏的输入要静默忽略（旧文件可能来自更早的版本） */

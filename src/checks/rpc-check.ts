@@ -130,6 +130,13 @@ check(
   Boolean(bm) && screenAll.includes(bm),
   bm ? `initialize.result.model = ${bm}，状态栏可见` : 'getBackendModel() 为空（握手没回填）',
 )
+// harness 模式：mode/get 连接即回填，状态栏有独立模式段（新会话默认 plan）
+const modeSeg = screenAll.match(/· (plan|execute) ·/)
+check(
+  '状态栏显示 harness 模式段',
+  Boolean(modeSeg),
+  modeSeg ? `模式段可见：${modeSeg[0]}` : '状态栏里没找到 · plan/execute ·',
+)
 
 const failures = checks.filter((c) => !c.ok)
 const finalScreen = screen
