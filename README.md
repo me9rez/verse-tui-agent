@@ -27,6 +27,8 @@
 pnpm install
 cp .env.example .env    # 填 provider；不填也能跑（默认离线 mock 剧本）
 pnpm dev                # 交互式（默认开一个新会话）
+pnpm backend            # 起唯一 agent 后端（Agent Framework，ws://127.0.0.1:8765）
+VT_AGENT=rpc pnpm dev   # TUI 接上后端（真实 agent 的标准姿势，详见 docs/architecture.md）
 
 VT_CONTINUE=1 pnpm dev  # 接着最近一次会话继续（转写与模型上下文一起恢复）
 pnpm dev -- --list-sessions          # 列出落盘的会话（不进 TUI，无需 TTY）
@@ -44,6 +46,7 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项 + `.env` 加载行为 9 项（离线，不需要 key） |
 | `pnpm live` | 无头：真实 SSE 端点的纯文本流 6 项 |
 | `pnpm agent` | 无头：AI SDK 工具 agent 10 项（含用 `fs` 独立核对模型写下的文件） |
+| `pnpm rpc` | 无头：WebSocket JSON-RPC 后端 6 项（需先起 `pnpm backend`） |
 | `pnpm sessions` | 无头：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
@@ -215,6 +218,7 @@ src/
     smoke.ts               渲染 / 流式 / 折叠 / 颜色 20 项（离线 mock）
     live-check.ts          真实 SSE 端点 6 项
     agent-check.ts         AI SDK 工具 agent 10 项（含 fs 独立核对）
+    rpc-check.ts           WebSocket JSON-RPC 后端 6 项（需服务端在跑）
     env-check.ts           .env 加载行为 9 项（优先级 / 覆盖 / 坏行 / 不外泄）
   probes/                一次性探针：摸清库行为 + 排版回归
     toolrow.ts / foldmark.ts / indent.ts / layout.ts / debug-agent.ts
@@ -236,6 +240,7 @@ src/
     mockSession.ts         本地剧本（工具步骤真的起子进程）
     liveSession.ts         裸 SSE 纯文本流
     aiSdkSession.ts        AI SDK 工具 agent（read / write / edit / bash / ls）
+    rpcSession.ts          远端 harness 后端（WebSocket + JSON-RPC 2.0）
 ```
 
 导入方向是单向的：`cli/checks/probes → ui/agent → core`，core 内部 `store → rows → markdown → types`，无反向依赖、无循环。`checks/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
@@ -276,6 +281,50 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 - **历史用 `result.responseMessages` 累积**（含 tool 消息），多轮能接着聊。
 - **这不是沙箱**：`bash` 跑的是真实命令，只是把 cwd 固定在 `.agent-sandbox`。别拿它跑不可信输入。
 
+## 唯一后端：Agent Framework（WebSocket + JSON-RPC 2.0）
+
+**方向（见 `docs/architecture.md`）**：本仓库单仓 = TUI + `backend/`（Python），`backend/` 是唯一
+agent 后端，所有 agent 能力统一用 Microsoft Agent Framework 的 harness（`create_harness_agent`：
+todo/工具循环 + FileHistoryProvider 跨进程历史）在 `backend/` 内开发；TS 侧只做渲染与会话编排。
+`live` / `ai` 两条旧实现已冻结弃用（删除待单独决策），`mock` 永久保留为离线测试夹具。
+
+```bash
+# 1. 起后端（= cd backend && uv run python rpc_server.py；首次先 cd backend && uv sync）
+pnpm backend
+
+# 2. 交互式接上
+VT_AGENT=rpc pnpm dev        # 或 TUI 里敲 /rpc
+
+# 3. 断言（协议级 + 无头端到端）
+cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 11 项
+cd backend && ../backend/.venv/Scripts/python test_switch.py # 6 项
+pnpm rpc                                                  # 6 项（TUI↔后端真实链路）
+```
+
+协议（JSON-RPC 2.0 over WebSocket，**权威定义见 `backend/rpc_server.py` 模块 docstring**）：
+
+```
+请求   {"jsonrpc":"2.0","id":1,"method":"agent/chat","params":{"session":"vt-xxx","prompt":"…"}}
+事件   {"jsonrpc":"2.0","method":"agent/event","params":{"event":{"type":"answer_delta","text":"…"}}}
+       type: thinking_delta / thinking_end / tool_start / tool_line / tool_end / answer_delta
+终态   {"jsonrpc":"2.0","id":1,"result":{"text":"…","usage":{…}}}    或 error
+取消   agent/cancel → {"cancelled":bool}；被取消那轮的 chat 另收 -32001；忙时新 chat 收 -32003
+```
+
+几个刻意的点：
+
+- **一个请求 = 一轮**：JSON-RPC 规范没有流式语义，用「事件通知在前、终态响应在后」的常见模式；
+  客户端靠 `id` 把事件归到当前轮，响应到达即 `respond()` 返回（= 回合结束）。
+- **会话状态在服务端**：客户端 `snapshot()` 只存 `serverSid`；历史由服务端 FileHistoryProvider
+  按 `session` 落 JSONL（`backend/history/`），**重启 TUI 后 `/open` 恢复的会话能接上服务端已有上下文**。
+- **工具行服务端拼好再推**：`function_call` 的 `arguments` 是增量分片，服务端等
+  `finish_reason=tool_calls` 拼完整、JSON 解析后才发 `tool_start`（带完整 params），
+  客户端不做参数拼接——协议里跨 chunk 的状态留在产生它的地方。
+- **失败也是一等公民**：连不上 / 中途断开 → 转写里出现 `[RPC 错误] …`（rpc-check 用它做断言），
+  不会静默挂起。
+
+------
+
 ## 持久会话与多会话
 
 一轮跑完（含 Esc 中断）就把这一轮落盘；`/open` 切回来时会**用同一套 store API 重放**转写
@@ -290,7 +339,7 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
   "v": 1,                                  // schema 版本；不兼容升级时 +1，坏文件会被跳过而不是崩
   "id": "20260918-172237-uw3c",
   "title": "这个 demo 的流式输出是怎么实现的？",   // 首条用户输入压平后截断 40 字
-  "kind": "ai",                            // mock | live | ai
+  "kind": "ai",                            // mock | live | ai | rpc
   "provider": { "host": "…", "model": "…" },     // 只记名字，**不存密钥**
   "turns": [
     {
@@ -298,7 +347,7 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
       "thinking": ["…"],                   // 完整行（不是流式增量）
       "tools": [{ "name": "read_file", "arg": "…", "params": { "path": "…" }, "status": "ok", "out": ["102| …"] }],
       "answer": ["…"],
-      "agentState": [ /* 仅 ai 路：AI SDK 的消息数组，用于恢复多轮上下文 */ ]
+      "agentState": [ /* 仅 ai 路：AI SDK 的消息数组；rpc 路存 {sid}（服务端会话 id），用于恢复多轮上下文 */ ]
     }
   ]
 }
@@ -325,7 +374,7 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 
 ## 验证（实测）
 
-四个无头套件，退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来）。
+四个无头套件 + 一个需要后端在跑的 RPC 套件，退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来）。
 **它们都不会往仓库的 `.verse-sessions/` 写东西**：`smoke` 用临时目录（它要测落盘），`live` / `agent` 直接 `VT_NO_PERSIST=1`：
 
 | 命令 | 覆盖 | 断言数 |
@@ -333,6 +382,9 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 | `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 20 + 9 = 29 |
 | `pnpm live` | 真实 SSE 端点的纯文本流 | 6 |
 | `pnpm agent` | 真实 API + 真实工具循环（含 `fs` 独立核对与上下文快照） | 11 |
+| `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（需 `pnpm backend` 在跑） | 6 |
+| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码（`uv run python test_rpc.py`） | 11 |
+| `backend/test_switch.py` | 协议级：会话切换/隔离/重连恢复（`uv run python test_switch.py`） | 6 |
 | `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（临时目录） | 24 |
 
 断言的是**事实**而不是「函数被调用过」。真实输出：
@@ -362,6 +414,12 @@ streamText({ model, system, messages, tools, stopWhen: stepCountIs(8) })
 ✔ 流式是增量的 — 采样 372 次，version 跨度 237
 ✔ 折叠真的收起内容（可见行下降 + ▸ 标记） — 可见行 88 → 40
 ✔ 再展开恢复（▾ 且行数变多） — 可见行 40 → 205
+
+# pnpm rpc（真实 WS + JSON-RPC，后端 cn:hy3 harness）
+✔ RPC 后端真的在流式推事件 — 采样 155 次，version 跨度 96
+✔ 没有 HTTP/网络/RPC 错误 — 转写里没有 [请求失败]/[流中断]/[RPC 错误]
+✔ markdown 被解析成结构化行 — 行样式集合：code/plain/bullet
+✔ 耗时合理 — 整轮 4.8s
 ```
 
 两条断言纪律值得单独说：

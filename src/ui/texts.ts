@@ -11,6 +11,7 @@ export const HELP = [
   '  /long    跑一段长回答（演示滚动与自动贴底）',
   '  /live    切到真实模型流（需要 VT_BASE_URL / VT_MODEL）',
   '  /ai      切到 AI SDK 工具 agent（read/write/edit/bash/ls）',
+  '  /rpc     切到唯一 agent 后端（WebSocket JSON-RPC，需先 pnpm backend 起服务）',
   '  /env     看当前 provider 配置（不回显密钥）',
   '  /sessions        列出落盘的会话（▶ = 当前）',
   '  /open <序号|id>   切换会话（恢复转写与模型上下文）',

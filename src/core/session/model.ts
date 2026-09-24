@@ -29,7 +29,7 @@ export type StoredTurn = {
   agentState?: unknown
 }
 
-export type SessionKind = 'mock' | 'live' | 'ai'
+export type SessionKind = 'mock' | 'live' | 'ai' | 'rpc'
 
 export type StoredSession = {
   v: typeof SESSION_SCHEMA_V
@@ -77,7 +77,7 @@ export function asStoredSession(value: unknown): StoredSession | null {
   if (s.v !== SESSION_SCHEMA_V) return null
   if (typeof s.id !== 'string' || !s.id) return null
   if (typeof s.title !== 'string') return null
-  if (s.kind !== 'mock' && s.kind !== 'live' && s.kind !== 'ai') return null
+  if (s.kind !== 'mock' && s.kind !== 'live' && s.kind !== 'ai' && s.kind !== 'rpc') return null
   if (!Array.isArray(s.turns)) return null
   const epoch = new Date(0).toISOString()
   return {

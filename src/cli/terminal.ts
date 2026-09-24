@@ -65,6 +65,7 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 const cols = Math.max(MIN_COLS, process.stdout.columns || 100)
 const rows = Math.max(MIN_ROWS, process.stdout.rows || 30)
 const requested = (process.env.VT_AGENT ?? '').toLowerCase()
+const useRpc = requested === 'rpc'
 const useAgent = requested === 'ai'
 const useLive = requested === 'live' || process.env.VT_LIVE === '1'
 const speed = Number(process.env.VT_SPEED ?? '1') || 1
@@ -77,7 +78,7 @@ const app = createTerminalApp({
   component: App,
   props: {
     sessionId: sessionArg ?? (wantContinue ? 'last' : undefined),
-    sessionKind: useAgent ? 'ai' : useLive ? 'live' : 'mock',
+    sessionKind: useRpc ? 'rpc' : useAgent ? 'ai' : useLive ? 'live' : 'mock',
     speed,
     onReady(_api: AppApi) {
       /* 交互模式下不需要句柄 */

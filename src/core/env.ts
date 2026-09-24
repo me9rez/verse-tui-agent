@@ -31,6 +31,8 @@ export const KNOWN_KEYS = [
   'VT_MODEL',
   'VT_API_KEY',
   'VT_LIVE',
+  'VT_RPC_URL',
+  'VT_RPC_MODEL',
   'VT_SPEED',
   'VT_SHOT_ROWS',
   'VT_SHOT_PROMPT',

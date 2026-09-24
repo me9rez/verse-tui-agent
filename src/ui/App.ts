@@ -24,6 +24,7 @@ import { createTranscriptStore, type TranscriptStore } from '../core/transcript/
 import { createMockSession } from '../agent/mockSession.ts'
 import { createLiveSession } from '../agent/liveSession.ts'
 import { createAiSdkSession } from '../agent/aiSdkSession.ts'
+import { createRpcSession } from '../agent/rpcSession.ts'
 import type { AgentSession } from '../agent/session.ts'
 import { describeProvider, dotEnvResult } from '../core/env.ts'
 import { styles } from '../core/theme.ts'
@@ -68,7 +69,7 @@ export type AppApi = {
 export const App = defineComponent({
   name: 'VerseApp',
   props: {
-    sessionKind: { type: String as PropType<'mock' | 'live'>, default: 'mock' },
+    sessionKind: { type: String as PropType<'mock' | 'live' | 'ai' | 'rpc'>, default: 'mock' },
     /** 流式节奏倍数：1 = 演示速度，0 = 尽快跑完（smoke 用）。 */
     speed: { type: Number, default: 1 },
     autoPrompt: { type: String, default: '' },
@@ -101,8 +102,9 @@ export const App = defineComponent({
       apiKey: process.env.VT_API_KEY,
     }
     const canGoLive = Boolean(liveEnv.baseUrl && liveEnv.model)
-    /** 三种会话：mock 剧本 / 裸 SSE / AI SDK 工具 agent（形状参照 pi） */
+    /** 四种会话：mock 剧本 / 裸 SSE / AI SDK 工具 agent / 远端 RPC harness */
     const makeSession = (kind: string): AgentSession => {
+      if (kind === 'rpc') return createRpcSession()
       if (!canGoLive) return createMockSession()
       if (kind === 'ai') {
         return createAiSdkSession({ ...liveEnv, root: process.env.VT_AGENT_ROOT ?? process.cwd() })
@@ -118,10 +120,20 @@ export const App = defineComponent({
     /** 当前会话的磁盘状态；用容器而不是 ref：它不是渲染数据，别引多余的响应式触发 */
     const current: { session: StoredSession | null } = { session: null }
 
-    const providerInfo = (): { host?: string; model?: string } => ({
-      host: liveEnv.baseUrl ? new URL(liveEnv.baseUrl).host : undefined,
-      model: liveEnv.model || undefined,
-    })
+    const providerInfo = (kind: SessionKind): { host?: string; model?: string } => {
+      if (kind === 'rpc') {
+        const rpcUrl = process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'
+        try {
+          return { host: new URL(rpcUrl).host, model: process.env.VT_RPC_MODEL ?? 'harness(rpc)' }
+        } catch {
+          return { host: rpcUrl }
+        }
+      }
+      return {
+        host: liveEnv.baseUrl ? new URL(liveEnv.baseUrl).host : undefined,
+        model: liveEnv.model || undefined,
+      }
+    }
 
     function startSession(kind: SessionKind, title = '新会话'): StoredSession {
       const now = new Date().toISOString()
@@ -130,7 +142,7 @@ export const App = defineComponent({
         id: newSessionId(),
         title,
         kind,
-        provider: providerInfo(),
+        provider: providerInfo(kind),
         createdAt: now,
         updatedAt: now,
         turns: [],
@@ -331,6 +343,11 @@ export const App = defineComponent({
             sessionRef.value = makeSession('ai')
             store.addNote(`已切到 AI SDK 工具 agent：${liveEnv.model}（工具循环上限 8 步）`)
           }
+        } else if (cmd === '/rpc') {
+          sessionRef.value = makeSession('rpc')
+          store.addNote(
+            `已切到远端 harness 后端：${process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'}（历史在服务端落盘）`,
+          )
         } else if (cmd === '/fold') {
           const collapsed = store.toggleAllGroups()
           store.addNote(collapsed ? '已折叠全部分组（Ctrl+O 展开）' : '已展开全部分组（Ctrl+O 折叠）')

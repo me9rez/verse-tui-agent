@@ -11,6 +11,8 @@
     "shot": "node src/cli/shot.ts",
     "live": "node src/checks/live-check.ts",
     "agent": "node src/checks/agent-check.ts",
+    "rpc": "node src/checks/rpc-check.ts",
+    "backend": "cd backend && uv run python rpc_server.py",
     "typecheck": "tsc -p tsconfig.json",
     "sessions": "node src/checks/session-check.ts"
   },
