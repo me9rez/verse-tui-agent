@@ -9,15 +9,17 @@
   },
   "scripts": {
     "dev": "node src/cli/terminal.ts",
-    "smoke": "node src/checks/smoke.ts",
+    "test": "vitest run",
+    "smoke": "vitest run test/smoke.test.ts",
     "shot": "node src/cli/shot.ts",
-    "rpc": "node src/checks/rpc-check.ts",
-    "complete": "node src/checks/complete-check.ts",
+    "rpc": "vitest run test/rpc.test.ts",
+    "complete": "vitest run test/complete.test.ts",
     "build": "tsdown",
     "backend": "cd backend && uv run python rpc_server.py",
-    "config-test": "cd backend && uv run python test_config.py",
+    "config-test": "cd backend && uv run pytest tests/test_config.py -q",
+    "test:backend": "cd backend && uv run pytest -q",
     "typecheck": "tsc -p tsconfig.json",
-    "sessions": "node src/checks/session-check.ts"
+    "sessions": "vitest run test/session.test.ts"
   },
   "license": "MIT",
   "dependencies": {
