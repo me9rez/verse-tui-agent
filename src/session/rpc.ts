@@ -18,6 +18,7 @@
  * snapshot() 只存服务端 session id，恢复时拿它接回同一份磁盘历史。
  */
 import type { AgentSession, ToolStep, TurnContext } from './seam.ts'
+import { setBackendModel } from './model.ts'
 
 export type RpcOptions = {
   /** 后端地址，默认 ws://127.0.0.1:8765（也可用 VT_RPC_URL） */
@@ -140,6 +141,13 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
         clearTimeout(timer)
         ws = sock
         resolve(sock)
+        // 握手：回显 server/provider/model；model 回填给 UI（欢迎块/状态栏）
+        rpcCall(sock, 'initialize')
+          .then((r) => {
+            const m = (r as { model?: unknown } | null)?.model
+            if (typeof m === 'string' && m) setBackendModel(m)
+          })
+          .catch(() => {})
       }
       sock.onmessage = (msg: MessageEvent) => handleMessage(String(msg.data))
       sock.onerror = () => {
@@ -165,6 +173,20 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
   function send(obj: Record<string, unknown>): void {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
   }
+
+  /** 按 id 等一条 JSON-RPC 响应（通知 agent/event 照旧走 handleMessage 分发）。 */
+  function rpcCall(sock: WebSocket, method: string, params?: Record<string, unknown>): Promise<unknown> {
+    const id = nextId++
+    const p = new Promise<unknown>((resolve, reject) => {
+      pending.set(id, { resolve, reject })
+    })
+    sock.send(JSON.stringify({ jsonrpc: '2.0', id, method, params: params ?? {} }))
+    return p
+  }
+
+  // 连上就握手一次：initialize.result.model 是后端 model 的权威值，回填给 UI 显示。
+  // 启动即连（懒连接会让欢迎块只看到环境变量兜底）；失败静默，首轮 respond 会再连。
+  void ensureSocket().then(undefined, () => {})
 
   return {
     id: 'rpc',
@@ -218,6 +240,15 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
         clearInterval(watchdog)
         sink = null
       }
+    },
+
+    /** /model <id>：model/set → 回填信号，返回后端确认的 id */
+    async setModel(id: string): Promise<string> {
+      const sock = await ensureSocket()
+      const r = (await rpcCall(sock, 'model/set', { model: id })) as { model?: unknown } | null
+      const next = typeof r?.model === 'string' && r.model ? r.model : id
+      setBackendModel(next)
+      return next
     },
   }
 }

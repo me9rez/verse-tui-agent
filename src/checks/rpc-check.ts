@@ -15,6 +15,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
+import { getBackendModel } from '../session/model.ts'
 import { styles } from '../core/theme.ts'
 import { rowsToHtml } from '../core/html.ts'
 import { loadDotEnv } from '../core/env.ts'
@@ -121,6 +122,14 @@ check(
   `行样式集合：${[...presets].join('/') || '(none)'}`,
 )
 check('耗时合理', elapsedMs > 200 && elapsedMs < 120_000, `整轮 ${(elapsedMs / 1000).toFixed(1)}s`)
+
+// model 显示：权威来源是握手 initialize.result.model（回填信号），不是 VT_RPC_MODEL 环境变量
+const bm = getBackendModel()
+check(
+  '握手回填后端 model 且状态栏显示',
+  Boolean(bm) && screenAll.includes(bm),
+  bm ? `initialize.result.model = ${bm}，状态栏可见` : 'getBackendModel() 为空（握手没回填）',
+)
 
 const failures = checks.filter((c) => !c.ok)
 const finalScreen = screen

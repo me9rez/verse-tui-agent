@@ -9,6 +9,8 @@ import type { Style } from '@simon_he/vue-tui/core'
 export const palette = {
   accent: '#d97757',
   accentDim: '#a9664c',
+  /** 欢迎块像素 logo（step 风格的紫） */
+  purple: '#a78bfa',
   text: '#e6e6ea',
   dim: '#8b8b93',
   faint: '#5a5a63',
@@ -65,6 +67,15 @@ export const styles = {
   dim: { fg: palette.dim },
   paramKey: { fg: palette.faint },
   paramVal: { fg: palette.codeFg },
+  // —— 欢迎块 / 无边框输入行（step 风格）——
+  logo: { fg: palette.purple },
+  infoLabel: { fg: palette.dim },
+  infoValue: { fg: palette.link },
+  tipCmd: { fg: palette.link, bold: true },
+  tipDesc: { fg: palette.dim },
+  divider: { fg: palette.border },
+  prefix: { fg: palette.accent, bold: true },
+  placeholder: { fg: palette.faint },
 }
 
 /**

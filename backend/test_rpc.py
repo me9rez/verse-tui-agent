@@ -7,6 +7,7 @@
   4. 工具轮：tool_start / tool_line / tool_end 事件按序到达
   5. agent/cancel 能掐掉一轮
   6. 错误路径：method not found、坏 prompt
+  7. model：initialize 权威回显、model/set 切换跟随、空值 -32602
 
 跑法：先起 rpc_server.py，再 python test_rpc.py
 """
@@ -140,6 +141,27 @@ async def main() -> int:
         check("method not found → -32601", r.get("error", {}).get("code") == -32601, str(r.get("error")))
         r = await rpc.call("agent/chat", {"session": SID, "prompt": "   "})
         check("坏 prompt → -32602", r.get("error", {}).get("code") == -32602, str(r.get("error")))
+
+        # 7. model：initialize 权威回显 → model/set 切换 → initialize 跟随 → 空值报错 → 切回原值
+        r = await rpc.call("initialize", timeout=10)
+        orig_model = r.get("result", {}).get("model")
+        check("initialize 回显当前 model", bool(orig_model), str(orig_model))
+        r = await rpc.call("model/set", {"model": "probe-model"})
+        check(
+            "model/set 回显新 model",
+            r.get("result", {}).get("model") == "probe-model" and r.get("result", {}).get("rebuilt") is True,
+            str(r.get("result") or r.get("error")),
+        )
+        r = await rpc.call("initialize", timeout=10)
+        check(
+            "initialize 跟随切换后的 model",
+            r.get("result", {}).get("model") == "probe-model",
+            str(r.get("result", {}).get("model")),
+        )
+        r = await rpc.call("model/set", {"model": ""})
+        check("空 model → -32602", r.get("error", {}).get("code") == -32602, str(r.get("error")))
+        # 切回原值，不污染后续手工验证
+        await rpc.call("model/set", {"model": orig_model})
 
     fails = [c for c in checks if not c[1]]
     print(f"\n{'FAIL' if fails else 'PASS'}: {len(checks) - len(fails)}/{len(checks)} 通过")

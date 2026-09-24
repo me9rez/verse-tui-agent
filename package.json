@@ -12,6 +12,7 @@
     "smoke": "node src/checks/smoke.ts && node src/checks/env-check.ts",
     "shot": "node src/cli/shot.ts",
     "rpc": "node src/checks/rpc-check.ts",
+    "complete": "node src/checks/complete-check.ts",
     "build": "tsdown",
     "backend": "cd backend && uv run python rpc_server.py",
     "typecheck": "tsc -p tsconfig.json",

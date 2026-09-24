@@ -91,6 +91,7 @@ VT_AGENT=rpc pnpm dev     # TUI 接上；或进 TUI 后敲 /rpc
 | `agent/chat` | 请求 | 发一轮。**流式 = 事件通知在前、终态响应在后**（JSON-RPC 规范无流式语义，这是选定的模式） |
 | `agent/cancel` | 请求 | 取消该 session 进行中的轮次；应答 `{cancelled:bool}`；被取消的 chat 另收 `-32001` |
 | `agent/reset` | 请求 | 丢弃服务端内存会话对象（磁盘历史保留） |
+| `model/set` | 请求 | 切服务端默认模型 = 重建 chat client + harness（plan/todos 重置、磁盘历史保留）；`{model,provider,rebuilt}`；轮次进行中拒绝 `-32003`、空值 `-32602`。客户端显示的 model 以 `initialize.result.model` 为权威，连上即握手回填 |
 | `initialize` / `ping` | 请求 | 能力发现 / 存活探测 |
 
 ### 4.2 事件（`agent/event` 通知，无 id）

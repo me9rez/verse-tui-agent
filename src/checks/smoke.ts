@@ -256,9 +256,9 @@ check(
 )
 check('状态栏渲染正常', /✻ ready/.test(afterFirst) && /tok/.test(afterFirst), '状态栏含 ready 与 token 计数')
 check(
-  '输入框渲染正常',
-  afterFirst.includes('输入消息 · Enter 发送') && /┌.*┐/.test(afterFirst),
-  '输入框边框与标题可见（TInputBox 的 placeholder 属性在 1.1.9 未接线，故用标题承载提示）',
+  '输入行渲染正常',
+  afterFirst.includes('问点什么') && />/.test(afterFirst),
+  "'>' 前缀与占位符可见（step 风格无边框输入行）",
 )
 check('响应式宽度未溢出', finalScreen.every((line) => line.length <= COLS), `所有行 ≤ ${COLS} 列`)
 check(

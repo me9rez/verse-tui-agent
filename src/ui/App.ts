@@ -2,11 +2,11 @@
  * Verse 的界面装配：终端流式 agent 的 TUI（vue-tui 渲染）。
  *
  * 版面（全屏 + alternate screen，坐标都是绝对单元格坐标）：
- *   y=0            顶栏（品牌 + 会话/模型）
- *   y=1..statusY-1 转写正文（transcript plane：流式增量只重绘这里）
- *   y=statusY      状态栏（chrome plane）
- *   y=inputY..+2   输入框（default plane，3 行含边框）
- *   y=hintY        快捷键提示
+ *   y=0..divider-1  空态：欢迎块（版本边框 + 像素 logo + model/cwd + Tips）+ 空态提示；
+ *                   有内容：转写正文（transcript plane：流式增量只重绘这里）
+ *   y=dividerY      分割线
+ *   y=inputY        输入行（> 前缀 + 无边框 TInput + 占位符，overlay plane——补全弹窗同平面）
+ *   y=statusY       状态栏（phase · 模式 · 模型 · cwd / 会话 · tok · tools）
  *
  * 流式输出的落点全在 TranscriptStore：每次增量只改一行 + 自增 version，
  * <TTranscriptView> 比对每行 getRowVersion 后只重绘脏行。
@@ -15,19 +15,20 @@ import { appendFileSync } from 'node:fs'
 import { computed, defineComponent, h, onBeforeUnmount, reactive, ref, type PropType } from 'vue'
 import { TText, TView } from '@simon_he/vue-tui'
 import { TTranscriptView, TRenderPlane } from '@simon_he/vue-tui/agent'
-import { TInputBox, useTerminal } from '@simon_he/vue-tui/vue'
+import { TBox, TInput, createPromptMentionPlugin, useTerminal } from '@simon_he/vue-tui/vue'
 import type { TerminalKeyboardEvent } from '@simon_he/vue-tui/runtime'
 import { layoutOf } from './layout.ts'
-import { HELP, HINT, NL, fitLine, stripControlChars } from './texts.ts'
+import { COMMANDS, EMPTY_NOTE, HELP, NL, PLACEHOLDER, stripControlChars } from './texts.ts'
 import { createTurnSink, type Phase } from '../session/sink.ts'
 import { createTranscriptStore, type TranscriptStore } from '../transcript/index.ts'
 import { createMockSession } from '../session/mock.ts'
 import { createRpcSession } from '../session/rpc.ts'
+import { onBackendModel } from '../session/model.ts'
 import type { AgentSession } from '../session/seam.ts'
 import { describeProvider, dotEnvResult } from '../core/env.ts'
 import { styles } from '../core/theme.ts'
-import { APP_NAME, HEADER_LABEL } from '../core/brand.ts'
-import { formatDuration, formatStamp } from '../core/text.ts'
+import { APP_ART, APP_VERSION } from '../core/brand.ts'
+import { cellWidth, formatDuration, formatStamp } from '../core/text.ts'
 import {
   deleteSession,
   latestSession,
@@ -89,6 +90,17 @@ export const App = defineComponent({
     const input = ref('')
     /** 每次提交后自增，用来换掉输入框实例（清空它的内部文本）。 */
     const composerKey = ref(0)
+
+    // ── slash 命令补全 ──────────────────────────────────────────────
+    // 建议与 /help 同源（texts.COMMANDS）；触发字符 '/'，模糊匹配 cmd。
+    // plugins 数组必须是稳定引用：TInput 的 plugins 是 init-only，
+    // 每帧传新数组字面量会触发 "plugins is init-only" 警告，警告会打进真实终端。
+    const promptPlugins = [createPromptMentionPlugin()] as const
+    const promptSuggestions = COMMANDS.map((c) => ({
+      value: c.cmd,
+      detail: c.usage ? `${c.usage} ${c.desc}` : c.desc,
+      keywords: [c.cmd.slice(1)],
+    }))
     const transcriptRef = ref<{ scrollToBottom?: () => void } | null>(null)
     const ui = reactive({ phase: 'idle' as Phase, streaming: false, aborted: false, startedAt: 0, elapsedMs: 0 })
     const turn = ref(0)
@@ -98,6 +110,18 @@ export const App = defineComponent({
     const makeSession = (kind: string): AgentSession =>
       kind === 'rpc' ? createRpcSession() : createMockSession()
     const sessionRef = ref<AgentSession>(makeSession(props.sessionKind))
+
+    /** 后端 model id：握手 initialize 回填 + /model 切换后更新（权威来源是后端，不是环境变量） */
+    const backendModel = ref('')
+    onBackendModel((m) => {
+      backendModel.value = m
+    })
+    /** 欢迎块/状态栏显示的 model：rpc = 后端确认的 id（没连上先用 env 兜底）；mock = 离线剧本 */
+    const displayModel = computed(() =>
+      sessionRef.value.kind === 'rpc'
+        ? backendModel.value || process.env.VT_RPC_MODEL || '连接后端中…'
+        : '离线剧本',
+    )
 
     // ── 持久会话 ──────────────────────────────────────────────────────────
     /** VT_NO_PERSIST=1 时完全不动磁盘（逃生门） */
@@ -109,7 +133,7 @@ export const App = defineComponent({
       if (kind !== 'rpc') return {} // mock 是离线剧本，没有 provider
       const rpcUrl = process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'
       try {
-        return { host: new URL(rpcUrl).host, model: process.env.VT_RPC_MODEL ?? 'harness(rpc)' }
+        return { host: new URL(rpcUrl).host, model: backendModel.value || (process.env.VT_RPC_MODEL ?? 'harness(rpc)') }
       } catch {
         return { host: rpcUrl }
       }
@@ -318,6 +342,26 @@ export const App = defineComponent({
         } else if (cmd === '/fold') {
           const collapsed = store.toggleAllGroups()
           store.addNote(collapsed ? '已折叠全部分组（Ctrl+O 展开）' : '已展开全部分组（Ctrl+O 折叠）')
+        } else if (cmd === '/model' || cmd.startsWith('/model ')) {
+          const arg = raw.trim().slice(6).trim()
+          if (!arg) {
+            store.addNote(`当前模型：${displayModel.value}${sessionRef.value.kind === 'rpc' ? '' : '（mock 剧本无模型）'}`)
+          } else if (sessionRef.value.kind !== 'rpc') {
+            store.addNote('当前是 mock 剧本，没有模型可切；/rpc 切到后端后再用 /model <id>。')
+          } else if (ui.streaming) {
+            store.addNote('⚠ 本轮还在跑，等结束再切换模型。')
+          } else {
+            try {
+              const next = await sessionRef.value.setModel?.(arg)
+              if (!next) store.addNote('后端不支持 model/set（需要更新 rpc_server.py）。')
+              else
+                store.addNote(
+                  `模型已切换为 ${next}：服务端后续轮次生效；plan/todos 随 harness 重建重置，对话历史仍在磁盘。`,
+                )
+            } catch (err) {
+              store.addNote(`切换失败：${err instanceof Error ? err.message : String(err)}`)
+            }
+          }
         } else if (cmd === '/env') {
           const p = describeProvider()
           const dot = dotEnvResult()
@@ -384,7 +428,7 @@ export const App = defineComponent({
       return '✻ ready'
     })
 
-    const statusLine = computed(() => {
+    const statusSegs = computed(() => {
       const cols = size.value.cols
       const stats = { ...store.stats.value, tokens: store.estimateTokens() }
       const right = [
@@ -395,8 +439,25 @@ export const App = defineComponent({
       ]
         .filter(Boolean)
         .join(' · ')
-      const left = `${phaseText.value}${ui.streaming ? '  (Esc 中断)' : ''}`
-      return fitLine(cols, left, right)
+      const mode = sessionRef.value.kind === 'rpc' ? 'rpc' : 'mock'
+      const model = displayModel.value
+      const parts = [
+        { text: `${phaseText.value}${ui.streaming ? '  (Esc 中断)' : ''}`, style: ui.streaming ? styles.statusActive : styles.statusOk },
+        { text: ' · ', style: styles.faint },
+        { text: mode, style: styles.tipCmd },
+        { text: ' · ', style: styles.faint },
+        { text: model, style: styles.infoValue },
+        { text: ' · ', style: styles.faint },
+        { text: process.cwd(), style: styles.faint },
+      ]
+      // 窄终端从右往左丢段（先丢 cwd，再丢模型），保证状态栏不换行不溢出
+      const rightW = cellWidth(right)
+      const widthOf = (list: typeof parts): number => list.reduce((n, p) => n + cellWidth(p.text), 0)
+      while (parts.length > 1 && widthOf(parts) + rightW + 3 > cols - 2) {
+        parts.pop() // cwd/model 段
+        if (parts.at(-1)?.text === ' · ') parts.pop()
+      }
+      return { parts, right }
     })
 
     const api: AppApi = {
@@ -446,30 +507,71 @@ export const App = defineComponent({
       // 关键：在分支之前先读一次 version，让整个渲染函数成为它的依赖。
       // 否则「空态」那一支不读任何响应式值，视图永远不会被唤醒去渲染正文。
       const version = store.version.value
-      const header = fitLine(cols, HEADER_LABEL, sessionRef.value.label)
       const empty = store.rowCount() === 0
 
+      // 欢迎块几何：边框2 + logo 区 + 空行 + Tips 标签与3条（child y0..11 → 内框12行）
+      const boxH = 14
+      const showWelcome = empty && l.transcriptH >= boxH + 1
+      const tipCmds = ['/rpc', '/sessions', '/help']
+
       return h(TView, { x: 0, y: 0, w: cols, h: size.value.rows, onKeydownCapture: onKey }, () => [
-        h(TRenderPlane, { plane: 'chrome', key: 'header' }, () => [
-          h(TText, { x: 1, y: l.headerY, w: cols - 2, h: 1, value: header, style: styles.header }),
-        ]),
         h(TRenderPlane, { plane: 'transcript', key: 'body' }, () =>
           empty
             ? [
+                // ── 欢迎块（step 风格）：版本边框 + 像素 logo + model/cwd + Tips ──
+                // 内容必须是 TBox 的 children（兄弟节点会被盒体自身的填充覆盖）；child 坐标相对内框。
+                ...(showWelcome
+                  ? [
+                      h(
+                        TBox,
+                        {
+                          x: 0,
+                          y: 0,
+                          w: cols,
+                          h: boxH,
+                          border: true,
+                          title: ` ${APP_VERSION} `,
+                          padding: 0,
+                          style: styles.divider,
+                        },
+                        () => [
+                          // 像素 logo（紫色）
+                          ...APP_ART.map((line, i) =>
+                            h(TText, { x: 1, y: i, w: 12, h: 1, value: line, style: styles.logo }),
+                          ),
+                          // 右侧信息：label 灰、value 蓝（值列对齐）
+                          h(TText, { x: 15, y: 1, w: 6, h: 1, value: 'model', style: styles.infoLabel }),
+                          h(TText, {
+                            x: 22,
+                            y: 1,
+                            w: Math.max(8, cols - 25),
+                            h: 1,
+                            value: displayModel.value,
+                            style: styles.infoValue,
+                          }),
+                          h(TText, { x: 15, y: 2, w: 4, h: 1, value: 'cwd', style: styles.infoLabel }),
+                          h(TText, { x: 22, y: 2, w: Math.max(8, cols - 25), h: 1, value: process.cwd(), style: styles.infoValue }),
+                          // Tips：命令蓝、说明灰（desc 与 /help 同源 COMMANDS）
+                          h(TText, { x: 1, y: 8, w: 8, h: 1, value: 'Tips', style: styles.infoLabel }),
+                          ...tipCmds.flatMap((cmd, i) => {
+                            const item = COMMANDS.find((c) => c.cmd === cmd)
+                            if (!item) return []
+                            return [
+                              h(TText, { x: 1, y: 9 + i, w: 12, h: 1, value: cmd, style: styles.tipCmd }),
+                              h(TText, { x: 13, y: 9 + i, w: Math.max(8, cols - 16), h: 1, value: item.desc, style: styles.tipDesc }),
+                            ]
+                          }),
+                        ],
+                      ),
+                    ]
+                  : []),
                 h(TText, {
                   x: 2,
-                  y: l.transcriptY + 1,
+                  y: boxH + 1,
                   w: Math.max(10, cols - 4),
-                  h: l.transcriptH - 2,
-                  wrap: true,
-                  style: styles.toolSummary,
-                  value: [
-                    `${APP_NAME} · 用 vue-tui 搭的终端流式 agent demo。`,
-                    '',
-                    '输入一句话回车，就能看到完整链路：思考流 → 真实执行的工具调用 → 增量 markdown 正文。',
-                    '',
-                    '试试 /long 看长文本滚动，Esc 中断一轮，Ctrl+C 退出。',
-                  ].join('\n'),
+                  h: 1,
+                  style: styles.faint,
+                  value: EMPTY_NOTE,
                 }),
               ]
             : [
@@ -493,19 +595,43 @@ export const App = defineComponent({
                 }),
               ],
         ),
-        h(TRenderPlane, { plane: 'chrome', key: 'status' }, () => [
-          h(TText, { x: 1, y: l.statusY, w: cols - 2, h: 1, value: statusLine.value, style: styles.status }),
+        h(TRenderPlane, { plane: 'chrome', key: 'status' }, () => {
+          const { parts, right } = statusSegs.value
+          const rightW = cellWidth(right)
+          let x = 1
+          const nodes = parts.map((p) => {
+            const w = cellWidth(p.text)
+            const node = h(TText, { x, y: l.statusY, w, h: 1, value: p.text, style: p.style })
+            x += w
+            return node
+          })
+          nodes.push(
+            h(TText, {
+              x: Math.max(x + 1, cols - 1 - rightW),
+              y: l.statusY,
+              w: rightW + 1,
+              h: 1,
+              value: right,
+              style: styles.status,
+            }),
+          )
+          return nodes
+        }),
+        h(TRenderPlane, { plane: 'chrome', key: 'divider' }, () => [
+          h(TText, { x: 0, y: l.dividerY, w: cols, h: 1, value: '─'.repeat(cols), style: styles.divider }),
         ]),
-        h(TRenderPlane, { plane: 'default', key: 'input' }, () => [
-          h(TInputBox, {
-            // TInputBox 不暴露 clear()/focus()，内部文本是它自己持有的；
+        // 输入行 = '>' 前缀 + 无边框 TInput + 占位符（step 风格）。
+        // 必须在 'overlay' plane：补全弹窗画在 zIndex 1e4 的 overlay 栈，
+        // 挂普通 plane/root 会被逐帧合并吃掉（实测 7 槽只剩 1 行）。
+        h(TRenderPlane, { plane: 'overlay', key: 'input' }, () => [
+          h(TText, { x: 1, y: l.inputY, w: 2, h: 1, value: '>', style: styles.prefix }),
+          h(TInput, {
             // 提交后用 key 换一个新实例才是真正的"清空输入框"（否则下次输入会拼在旧文本后面）。
             key: composerKey.value,
-            x: 0,
+            x: 3,
             y: l.inputY,
-            w: cols,
-            h: 3,
-            title: ' 输入消息 · Enter 发送 ',
+            w: Math.max(4, cols - 4),
+            h: 1,
             modelValue: input.value,
             'onUpdate:modelValue': (v: string) => {
               input.value = v
@@ -515,11 +641,16 @@ export const App = defineComponent({
               composerKey.value += 1
               void handleSubmit(String(v ?? ''))
             },
+            placeholder: PLACEHOLDER,
+            placeholderWhenFocused: true,
+            style: styles.text,
             autoFocus: true,
+            plugins: promptPlugins,
+            promptSuggestions,
+            promptTrigger: '/',
+            promptMaxItems: 8,
+            promptAlign: 'input',
           }),
-        ]),
-        h(TRenderPlane, { plane: 'chrome', key: 'hint' }, () => [
-          h(TText, { x: 1, y: l.hintY, w: cols - 2, h: 1, value: HINT, style: styles.hint }),
         ]),
       ])
     }

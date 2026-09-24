@@ -44,6 +44,7 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
 | `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项 + `.env` 加载行为 9 项（离线，不需要 key） |
+| `pnpm complete` | 无头：slash 命令补全的按键链路 4 项（离线 mock） |
 | `pnpm rpc` | 无头：WebSocket JSON-RPC 后端 6 项（需先起 `pnpm backend`） |
 | `pnpm sessions` | 无头：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
@@ -95,7 +96,8 @@ agent 工作区  <repo>/.agent-sandbox
 | **`Ctrl+O`** | **折叠 / 展开全部分组** |
 | **点标题** | 鼠标点分组标题也能折叠 / 展开（库画 ▸/▾ 并带命中区） |
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
-| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/exit` |
+| **输入 `/`** | **命令自动补全**：↑↓ 选择 · Enter/Tab 采用（再按 Enter 发送）· 模糊匹配、与 `/help` 同一张命令表 |
+| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model <id>`（查看/切换后端模型） `/exit` |
 | 会话 | `/sessions` 列表（▶ = 当前）· `/open <序号\|id>` 切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
 `/long` 会吐一段长回答，专门用来看长内容下的增量重绘与滚动保持。
@@ -112,7 +114,7 @@ agent 工作区  <repo>/.agent-sandbox
 
 留白：每个块（用户消息 / 思考组 / 工具组 / 正文 / 提示）开始前插**一行空行**，由 `store.blank()` 统一处理 —— 它只在「上一行不是空行」时插入，所以不会出现连续空行。这一条是观感的关键。
 
-噪音文案一律去掉：折叠行不重复「（点我展开）」（提示栏里说一次就够），无参数的调用不打「（无参数）」，状态用 `· ok` / `· err` 与标题分开。工具输出**按原样显示**，不为了对齐去改工具自己的格式。
+噪音文案一律去掉：折叠行不重复「（点我展开）」（占位符与 /help 里各说一次就够），无参数的调用不打「（无参数）」，状态用 `· ok` / `· err` 与标题分开。工具输出**按原样显示**，不为了对齐去改工具自己的格式。
 
 **流式进行中**：只有正在写的那一块是展开的，前面的组自动收起（截图是跑到第二个工具时的状态，状态栏显示 `Running tool…`）：
 
@@ -218,13 +220,14 @@ src/
     smoke.ts               渲染 / 流式 / 折叠 / 颜色 20 项（离线 mock）
     env-check.ts           .env 加载行为 9 项（优先级 / 覆盖 / 坏行 / 不外泄）
     rpc-check.ts           WebSocket JSON-RPC 后端 6 项（需 pnpm backend 在跑）
+    complete-check.ts      slash 命令补全的按键链路 4 项（events.dispatch 注入按键）
     session-check.ts       会话落盘 / 读回 / 重放 / 记录器 24 项
   probes/                一次性探针：摸清库行为 + 排版回归
-    toolrow.ts / foldmark.ts / foldrule.ts / indent.ts / layout.ts / color.ts / codecolor.ts / complete.ts / session-seed.ts
+    toolrow.ts / foldmark.ts / foldrule.ts / indent.ts / layout.ts / color.ts / codecolor.ts / complete.ts / promptdebug.ts / welcomedump.ts / session-seed.ts
   ui/                    界面层
     App.ts                 组件装配：版面、命令、键盘、对外 AppApi
     layout.ts              版面坐标（layoutOf）
-    texts.ts               命令帮助、提示栏、状态行对齐、输入清洗
+    texts.ts               命令表（/help 与 / 补全同源）、占位符与空态文案、状态行对齐、输入清洗
   session/               会话域（接缝 + 实现 + 落盘，一个概念一个目录）
     seam.ts                接缝类型（AgentSession / StreamStep / ToolStep / TurnSink）
     mock.ts                本地剧本（工具步骤真的起子进程）
@@ -249,7 +252,13 @@ src/
 会话层(本地剧本 / RPC 后端)  ──delta──▶  TranscriptStore  ──version──▶  TTranscriptView  ──只重绘脏行──▶  终端 buffer
 ```
 
-版面按 plane 分区（库的 `TRenderPlane`）：transcript（每 10~20ms 一次）、chrome 状态栏（每 100ms 一次）、输入框（只在按键时）互不干扰 —— 正文刷 30 行也不会让输入框光标闪一下。
+版面按 plane 分区（库的 `TRenderPlane`）：transcript（空态欢迎块 / 正文，每 10~20ms 一次）、chrome（状态栏与分割线，每 100ms 一次）、**overlay（输入行 + 补全弹窗**，只在按键时）——正文刷 30 行也不会让输入框光标闪一下，补全弹窗必须在 overlay 平面（见「踩过的坑」）。
+
+### 空态与输入行（step 风格）
+
+- **欢迎块**（仅空态）：`v0.1.0` 边框标题 + 紫色像素 V logo + `model`/`cwd` 信息列 + `Tips`（三条命令，desc 与 `/help` 同源于 `COMMANDS`）；下面一行空态提示，再往下是留白。`model` 显示后端握手 `initialize.result.model` 的权威值（rpc 会话创建即连后端回填；`/model <id>` 切换后跟随更新），不是环境变量。
+- **输入行**：`>` 前缀（accent 色）+ 无边框 `TInput` + 占位符 `问点什么（/ 补全命令 · Enter 发送 · Esc 中断）`，上方一条 `─` 分割线；输入 `/` 弹补全（弹窗画在输入行上方的 overlay 栈）。
+- **状态栏**（底行，多段拼色）：`✻ ready · 模式 · 模型 · cwd`（左）+ `会话 · N tok · N tools`（右）；窄终端从右往左自动丢段（先 cwd 后模型），永不换行溢出。`模型` 段与欢迎块同源（`displayModel` = 握手回填的后端 model id）。
 
 ## 唯一后端：Agent Framework（WebSocket + JSON-RPC 2.0）
 
@@ -266,7 +275,7 @@ pnpm backend
 VT_AGENT=rpc pnpm dev        # 或 TUI 里敲 /rpc
 
 # 3. 断言（协议级 + 无头端到端）
-cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 11 项
+cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 15 项
 cd backend && ../backend/.venv/Scripts/python test_switch.py # 6 项
 pnpm rpc                                                  # 6 项（TUI↔后端真实链路）
 ```
@@ -344,14 +353,15 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 
 ## 验证（实测）
 
-四个无头套件 + 一个需要后端在跑的 RPC 套件，退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来）。
-**它们都不会往仓库的 `.verse-sessions/` 写东西**：`smoke` 用临时目录（它要测落盘），`live` / `agent` 直接 `VT_NO_PERSIST=1`：
+无头套件退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来；`rpc` 需要 `pnpm backend` 在跑，其余离线）。
+**它们都不会往仓库的 `.verse-sessions/` 写东西**：`smoke` / `sessions` 用临时目录，`rpc` / `complete` 直接 `VT_NO_PERSIST=1`：
 
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|
 | `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 20 + 9 = 29 |
 | `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（需 `pnpm backend` 在跑） | 6 |
-| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码（`uv run python test_rpc.py`） | 11 |
+| `pnpm complete` | slash 命令补全的按键注入链路（离线 mock） | 4 |
+| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换（`uv run python test_rpc.py`） | 15 |
 | `backend/test_switch.py` | 协议级：会话切换/隔离/重连恢复（`uv run python test_switch.py`） | 6 |
 | `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（临时目录） | 24 |
 
@@ -370,6 +380,12 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 ✔ 代码块按语言上色 — 5 行代码，合计 5 种前景色：#c9d1f2 #7fb3ff #c678dd #56b6c2 #6f7480
 ✔ 分组头部按类型上色 — 头部出现 4 种颜色：#8b8b93 #5a5a63 #7fb3ff #d97757
 
+# pnpm complete（离线 mock，events.dispatch 注入按键）
+✔ 输入 '/' 弹出命令补全 — 屏幕上出现 /help、/sessions、/new 的 detail 文案
+✔ 查询 '/he' 收窄匹配 — 只剩 /help 的 detail，其余命令被过滤
+✔ Enter 采用建议而非提交 — 弹窗收起（suppressed），转写里还没有 /help 的说明 note
+✔ /help 被真正执行 — HELP note 出现在转写
+
 # pnpm rpc（真实 WS + JSON-RPC，后端 cn:hy3 harness）
 ✔ RPC 后端真的在流式推事件 — 采样 155 次，version 跨度 96
 ✔ 没有 HTTP/网络/RPC 错误 — 转写里没有 [请求失败]/[流中断]/[RPC 错误]
@@ -385,11 +401,14 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 
 ## 踩过的坑
 
-**库行为（`@simon_he/vue-tui` 1.1.9，全部实测）**
+**库行为（`@simon_he/vue-tui` 1.1.11，全部实测）**
 
 - **transcript 行是「段落式」的**：同一行里 segments 之间写换行符**不会**断行，所以这里按物理行拆 row，而不是「一条消息一个 row」。一开始按消息拆行时整段 markdown 挤成一坨。
 - **`TInputBox` 的 `placeholder` 没接线**：types 里有、1.1.9 的实现里没渲染，所以输入提示放进了框线标题。
 - **`TInputBox` 提交后不会自己清空**：把 `modelValue` 置空不生效（组件内部持有文本，也没 expose `clear()`），做法是提交后自增 `key` 强制重建输入框。这个坑是往 PTY 里连发两次 `/env` 才暴露的 —— 第二次提交的文本实际是 `/env/env`，掉进了「未知命令」分支。顺带加了控制字符清洗和 `VT_DEBUG_INPUT=1`（把**原始提交文本按 JSON** 记进 `.artifacts/input-debug.log`）。
+- **TBox 的内容必须做成 children**：欢迎块第一版把 logo/Tips 画成 TBox 的兄弟节点，结果整块内容被盒体自身的填充覆盖得只剩边框——TBox 的绘制发生在子树之后，兄弟节点必输。
+- **TInput 的占位符要 `placeholderWhenFocused`**：默认 false，autoFocus 的输入框（我们恒定聚焦）永远不显示 placeholder；设 true 才有 step 那种常驻提示。
+- **`/` 补全弹窗必须包在 `TRenderPlane plane="overlay"` 里**：弹窗是 prompt 插件画在 zIndex=1e4 独立栈上的；挂在 root 或 `'default'` 平面时，逐帧合并会吃掉内容行——实测框和最后一行在、前 6 行全空，flush 流里连 detail 都缺。挪进 `overlay` 平面后全部行稳定渲染（`pnpm complete` 4 项断言守着）。同一次实测还确认：`TInputBox` 不透传 `prompt*` props（types + 源码双验证），补全必须自己用 `TBox + TInput` 组合，`prompt*` 直接给 `TInput`。
 - **Node 的类型剥离模式不支持构造函数参数属性**（`constructor(private x: T)` → `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`）。
 
 **自己写的工具也得防**

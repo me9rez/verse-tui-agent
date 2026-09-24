@@ -17,6 +17,12 @@ JSON-RPC 2.0 over WebSocket 协议
   {"jsonrpc":"2.0","id":9,"method":"agent/cancel","params":{"session":"<sid>"}}
       → 应答 {"result":{"cancelled":true|false}}；被取消那轮的 chat 请求另收 -32001 终态
   {"jsonrpc":"2.0","id":2,"method":"agent/reset","params":{"session":"<sid>"}}
+  {"jsonrpc":"2.0","id":7,"method":"model/set","params":{"model":"<模型 id>"}}
+      → 应答 {"result":{"model":"<新 id>","provider":...,"rebuilt":true}}
+      → 语义：切服务端默认模型 = 重建 chat client + harness agent（全局生效，
+        影响后续所有轮次）；plan/todos 随 harness 重建重置，磁盘历史不受影响。
+        有轮次在跑时拒绝（-32003）；空 model → -32602。
+        initialize.result.model 是当前 model 的权威回显，客户端据此显示。
   {"jsonrpc":"2.0","id":3,"method":"initialize"} / {"method":"ping"}
 
 服务端 → 客户端（一轮进行中的流式事件，通知，无 id）：
@@ -113,21 +119,30 @@ if PROVIDER == "wb2api":
 else:
     from agent_framework.openai import OpenAIChatClient as _ClientCls
 
-client = _ClientCls(model=MODEL, base_url=BASE_URL, api_key=API_KEY or None)
+def _build_agent(model: str):
+    """按指定 model 造 chat client + harness agent（启动时与 model/set 切换时共用）。
 
-agent = create_harness_agent(
-    client,
-    name="verse-agent",
-    # 对话历史：每 session 一个 append-only JSONL，跨连接/跨进程恢复（load_messages=True）
-    history_provider=FileHistoryProvider(HISTORY_DIR),
-    # PROVIDER=openai 时 OpenAIChatClient 默认服务端存会话，会跳过本地历史加载——
-    # 88api 这类兼容端点没有服务端会话，必须显式 store=False 让本地文件成为历史唯一来源
-    default_options={"store": False},
-    # 文件/命令工具收敛在 WORKSPACE 内，且不触发审批等待（协议没有审批通道）
-    file_access_disable_write_tool_approval=True,
-    file_access_disable_readonly_tool_approval=True,
-    disable_web_search=True,
-)
+    切换 = 整体重建：plan/todos（内存 SessionStore）随之重置，
+    对话历史在 FileHistoryProvider 磁盘 JSONL 里不受影响。
+    """
+    cli = _ClientCls(model=model, base_url=BASE_URL, api_key=API_KEY or None)
+    ag = create_harness_agent(
+        cli,
+        name="verse-agent",
+        # 对话历史：每 session 一个 append-only JSONL，跨连接/跨进程恢复（load_messages=True）
+        history_provider=FileHistoryProvider(HISTORY_DIR),
+        # PROVIDER=openai 时 OpenAIChatClient 默认服务端存会话，会跳过本地历史加载——
+        # 88api 这类兼容端点没有服务端会话，必须显式 store=False 让本地文件成为历史唯一来源
+        default_options={"store": False},
+        # 文件/命令工具收敛在 WORKSPACE 内，且不触发审批等待（协议没有审批通道）
+        file_access_disable_write_tool_approval=True,
+        file_access_disable_readonly_tool_approval=True,
+        disable_web_search=True,
+    )
+    return cli, ag
+
+
+client, agent = _build_agent(MODEL)
 log.info(
     "harness agent ready provider=%s model=%s base=%s history=%s workspace=%s",
     PROVIDER, MODEL, BASE_URL, HISTORY_DIR, WORKSPACE,
@@ -258,6 +273,8 @@ async def _send(ws, lock, payload: dict[str, Any]) -> None:
 
 async def handler(ws) -> None:
     """一条连接的收发循环：请求分发 + 每连接串行化发送。"""
+    # model/set 会换掉模块级的 MODEL/client/agent（全局，只加不改的协议扩展）
+    global MODEL, client, agent
     remote = getattr(ws, "remote_address", None)
     log.info("连接 %s", remote)
     send_lock = asyncio.Lock()
@@ -310,7 +327,20 @@ async def handler(ws) -> None:
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
                     "server": "verse-agent-backend", "version": "1.0.0",
                     "provider": PROVIDER, "model": MODEL,
-                    "methods": ["initialize", "ping", "agent/chat", "agent/cancel", "agent/reset"]}})
+                    "methods": ["initialize", "ping", "agent/chat", "agent/cancel", "agent/reset", "model/set"]}})
+            elif method == "model/set":                    # 切服务端默认模型（重建 client+harness）
+                new_model = str(params.get("model") or "").strip()
+                if not new_model:
+                    await _send(ws, send_lock, _err(rid, -32602, "model 不能为空"))
+                elif any(t and not t.done() for t in tasks.values()):
+                    # 本连接有轮次在跑：重建 harness 会把进行中的会话对象抽掉
+                    await _send(ws, send_lock, _err(rid, -32003, "本连接有轮次在跑，等本轮结束再 model/set"))
+                else:
+                    MODEL = new_model
+                    client, agent = _build_agent(MODEL)
+                    log.info("model 切换为 %s（harness 已重建，plan/todos 重置，磁盘历史保留）", MODEL)
+                    await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                        "model": MODEL, "provider": PROVIDER, "rebuilt": True}})
             elif method == "ping":
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid,
                                             "result": {"pong": True}})
