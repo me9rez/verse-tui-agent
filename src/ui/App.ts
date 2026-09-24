@@ -171,11 +171,22 @@ export const App = defineComponent({
       const cur = backendModel.value || effectiveConfig().default_model
       return effectiveConfig().models.map((m) => ({
         label: m.alias,
-        detail: `${m.display_name || m.model}${m.alias === cur ? '（当前）' : ''} · ${m.provider}/${m.model}`,
+        // detail 只留 display_name（+当前标记）：provider 已在别名里，原始 id /env 可查——
+        // 曾拼 ' · provider/model' 整条原始 id，行太长右列被截断（2026-09-24 截图反馈）
+        detail: `${m.display_name || m.model}${m.alias === cur ? '（当前）' : ''}`,
         value: m.alias,
         keywords: [m.model, m.provider],
       }))
     })
+    /** 选择器宽度自适应：最长一行（label + 2 格间隙 + detail）+ 6 格内边距，防右列截断。 */
+    function modelRowWidth(): number {
+      const list = modelItems.value
+      if (!list.length) return 30
+      const widest = Math.max(
+        ...list.map((it) => cellWidth(String(it.label)) + 2 + cellWidth(String(it.detail ?? ''))),
+      )
+      return widest + 6
+    }
     /** 打开选择器前把高亮预置到当前模型。 */
     function currentModelIndex(): number {
       const cur = backendModel.value || effectiveConfig().default_model
@@ -768,7 +779,7 @@ export const App = defineComponent({
             closeOnSelect: true,
             resetQueryOnClose: true,
             maxVisibleItems: 8,
-            w: Math.max(30, Math.min(72, cols - 8)),
+            w: Math.max(30, Math.min(cols - 4, modelRowWidth())),
             h: Math.max(8, 7 + Math.min(modelItems.value.length, 8)),
             selectedIndex: modelSelIdx.value,
             'onUpdate:selectedIndex': (i: number) => {
