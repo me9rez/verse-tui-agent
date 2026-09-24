@@ -47,6 +47,7 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm smoke` | vitest：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项软断言（离线，不需要 key） |
 | `pnpm complete` | vitest：slash 命令补全的按键链路 5 项（离线 mock） |
 | `pnpm rpc` | vitest：WebSocket JSON-RPC 后端 8 项（需先起 `pnpm backend`） |
+| `pnpm model` | vitest：`/model` 模型选择器 5 项（弹出/↑↓切换/Esc 取消/文本直切/mock 守卫，需后端） |
 | `pnpm sessions` | vitest：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
 | `pnpm config-test` | pytest：后端 TOML 配置 9 函数 23 断言（深合并/脱敏/坏文件回退，离线） |
 | `pnpm test:backend` | pytest 全量：20 函数 53 断言（protocol 十秒内；agent/switch 打真模型） |
@@ -93,7 +94,7 @@ tui  agent=rpc speed=1 persist=true · session_dir=…
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
 | **输入 `/`** | **命令自动补全**：↑↓ 选择 · Enter/Tab 采用（再按 Enter 发送）· 模糊匹配、与 `/help` 同一张命令表 |
 | **Shift+Tab** | **切 harness 模式 plan ↔ execute**（仅 rpc；状态栏独立模式段显示当前值，plan 高亮；mock 提示不支持） |
-| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model <id>`（查看/切换后端模型） `/exit` |
+| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model [<id>]`（无参弹模型选择器，带 id 直切） `/exit` |
 | 会话 | `/sessions` 列表（▶ = 当前）· `/open <序号\|id>` 切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
 `/long` 会吐一段长回答，专门用来看长内容下的增量重绘与滚动保持。
@@ -247,7 +248,7 @@ src/
 
 ### 空态与输入行（step 风格）
 
-- **欢迎块**（仅空态）：`v0.1.0` 边框标题 + 紫色像素 V logo + `model`/`cwd` 信息列 + `Tips`（三条命令，desc 与 `/help` 同源于 `COMMANDS`）；下面一行空态提示，再往下是留白。`model` 显示后端握手 `initialize.result.model` 的权威值（rpc 会话创建即连后端回填；`/model <id>` 切换后跟随更新），不是环境变量。
+- **欢迎块**（仅空态）：`v0.1.0` 边框标题 + 紫色像素 V logo + `model`/`cwd` 信息列 + `Tips`（三条命令，desc 与 `/help` 同源于 `COMMANDS`）；下面一行空态提示，再往下是留白。`model` 显示后端握手 `initialize.result.model` 的权威值（rpc 会话创建即连后端回填；`/model` 选择器或 `/model <id>` 切换后跟随更新），不是环境变量。
 - **输入行**：`>` 前缀（accent 色）+ 无边框 `TInput` + 占位符 `问点什么（/ 补全命令 · Enter 发送 · Esc 中断）`，上方一条 `─` 分割线；输入 `/` 弹补全（弹窗画在输入行上方的 overlay 栈）。
 - **状态栏**（底行，多段拼色）：`✻ ready · 模式 · 模型 · cwd`（左）+ `会话 · N tok · N tools`（右）；窄终端从右往左自动丢段（先 cwd 后模型），永不换行溢出。`模型` 段与欢迎块同源（`displayModel` = 握手回填的后端 model id）。
 
@@ -269,6 +270,7 @@ pnpm dev -- --rpc         # 或 tui.toml 设 agent = "rpc"，或 TUI 里敲 /rpc
 pnpm config-test        # pytest：配置 9 函数 23 断言
 pnpm test:backend       # pytest 全量 20 函数 53 断言（或 uv run pytest tests/test_rpc_protocol.py -q 只跑协议）
 pnpm rpc                # vitest：TUI↔后端真实链路 8 项
+pnpm model              # vitest：/model 选择器 5 项
 ```
 
 协议（JSON-RPC 2.0 over WebSocket，**权威定义见 `backend/rpc_server.py` 模块 docstring**）：
