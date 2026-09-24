@@ -47,6 +47,7 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm rpc` | 无头：WebSocket JSON-RPC 后端 6 项（需先起 `pnpm backend`） |
 | `pnpm sessions` | 无头：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
+| `pnpm build` | tsdown 编译 `src/cli` 两个入口到 `dist/`（`bin`: `verse` → `dist/terminal.mjs`，带 shebang 可直接执行） |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
 
 ## 配置：`.env`
