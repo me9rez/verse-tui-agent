@@ -25,7 +25,7 @@
 
 ```bash
 pnpm install
-mkdir -p ~/.verse && cp config.example.toml ~/.verse/config.toml   # 填 provider/api_key；不填也能跑（默认离线 mock 剧本）
+mkdir -p ~/.verse && cp docs/config.example.toml ~/.verse/config.toml   # 填 provider/api_key；不填也能跑（默认离线 mock 剧本）
 pnpm dev                # 交互式（默认开一个新会话）
 pnpm backend            # 起唯一 agent 后端（Agent Framework，ws://127.0.0.1:8765）
 pnpm dev -- --rpc        # TUI 接上后端（真实 agent 的标准姿势，详见 docs/architecture.md）
@@ -62,8 +62,8 @@ gateway 的 `config/get`（JSON-RPC 2.0）拿脱敏视图；连不上（离线 m
 
 | 文件 | 读取者 | 内容 |
 |---|---|---|
-| `~/.verse/config.toml` | gateway | provider / 模型 / 端口（复制 `config.example.toml` 改） |
-| `~/.verse/tui.toml` | gateway（下发给 TUI） | `agent` / `speed` / `persist` / `session_dir` / `[shot]` / `[check]`（复制 `tui.example.toml` 改） |
+| `~/.verse/config.toml` | gateway | provider / 模型 / 端口（复制 `docs/config.example.toml` 改） |
+| `~/.verse/tui.toml` | gateway（下发给 TUI） | `agent` / `speed` / `persist` / `session_dir` / `[shot]` / `[check]`（复制 `docs/tui.example.toml` 改） |
 | `<repo>/.verse/local.toml` | gateway | 项目级覆盖，**深合并**（同 schema），已 gitignore |
 
 - 三者按 `默认值 ← config.toml ← 项目 local.toml` 深合并（标量替换、表递归合并）；坏 TOML 只警告并回退，不中断启动。

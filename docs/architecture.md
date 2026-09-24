@@ -211,7 +211,7 @@ agent  = create_harness_agent(
 - 唯一环境变量 `VERSE_HOME`：整体换数据目录（对标 Kimi `KIMI_CODE_HOME`）。
 - 一次性覆盖用 CLI flag：`--rpc/--mock`、`--speed`、`--url`、`--continue`、`--session`、`--debug-input`。
 - 坏 TOML 只警告 + 回退默认；无 key 启动不崩（惰性装配，首次真实调用时报 -32000 中文错误）。
-- 例文件：仓库根 `config.example.toml` / `tui.example.toml`；测试：`pnpm config-test`（19 项）。
+- 例文件：`docs/config.example.toml` / `docs/tui.example.toml`；测试：`pnpm config-test`（9 函数 23 断言）。
 
 ## 9. 安全边界
 
