@@ -3,11 +3,6 @@ import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
 import { getBackendModel } from '../session/model.ts'
-import { loadDotEnv } from '../core/env.ts'
-
-loadDotEnv()
-process.env.VT_NO_PERSIST = '1'
-process.env.VT_AGENT = 'rpc'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const holder: { api: AppApi | null } = { api: null }
@@ -15,7 +10,7 @@ const app = createTerminalApp({
   cols: 100,
   rows: 30,
   component: App,
-  props: { sessionKind: 'rpc', speed: 0, onReady: (n: AppApi) => { holder.api = n } },
+  props: { sessionKind: 'rpc', speed: 0, persist: false, onReady: (n: AppApi) => { holder.api = n } },
   defaultStyle: styles.text,
 })
 app.mount()

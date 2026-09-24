@@ -14,7 +14,7 @@ const EXT = '.json'
 
 let dirOverride = ''
 
-/** 注入会话目录（TUI 启动按 tui 配置、测试指到临时目录；接替旧 VT_SESSION_DIR 环境变量）。 */
+/** 注入会话目录（TUI 启动按 tui 配置、测试指到临时目录；接替旧的会话目录环境变量）。 */
 export function setSessionDir(dir: string): void {
   dirOverride = dir
 }

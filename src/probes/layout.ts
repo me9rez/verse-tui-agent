@@ -1,10 +1,7 @@
 /**
  * 排版探针：把转写行按 JSON 打出来（含前导空格数），用来看块间空行与缩进是否到位。
- *   node src/probes/layout.ts
+ *   node src/probes/layout.ts [提示词]
  */
-import { loadDotEnv } from '../core/env.ts'
-loadDotEnv()
-
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
@@ -40,7 +37,7 @@ void out
 await sleep(60)
 if (!holder.api) process.exit(1)
 const api: AppApi = holder.api
-api.submit(process.env.VT_PROBE_PROMPT ?? '这个 demo 的流式输出是怎么实现的？')
+api.submit(process.argv[2] ?? '这个 demo 的流式输出是怎么实现的？')
 const deadline = Date.now() + 30_000
 while (!api.state().streaming && Date.now() < deadline) await sleep(5)
 while (api.state().streaming && Date.now() < deadline) await sleep(10)

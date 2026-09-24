@@ -1,8 +1,8 @@
 /**
  * RPC 后端的端到端检查：WebSocket + JSON-RPC 2.0，把断言建立在实际收到的事件上。
  *
- *   先起服务端：python <file-history-demo>/rpc_server.py
- *   再跑：      VT_AGENT=rpc node src/checks/rpc-check.ts   （或 pnpm rpc）
+ *   先起服务端：pnpm backend
+ *   再跑：      node src/checks/rpc-check.ts   （或 pnpm rpc；--url/--prompt/--timeout 覆盖 [check] 默认）
  *
  * 断言：
  *   1. 后端真的在流式推事件（version 在过程中持续增长，不是一次性给完）
@@ -18,16 +18,25 @@ import { App, type AppApi } from '../ui/App.ts'
 import { getBackendModel } from '../session/model.ts'
 import { styles } from '../core/theme.ts'
 import { rowsToHtml } from '../core/html.ts'
-import { loadDotEnv } from '../core/env.ts'
+import { DEFAULT_RPC_URL, effectiveConfig, fetchBoot, setBoot } from '../core/config.ts'
 
-loadDotEnv()
-
+const argv = process.argv.slice(2)
+const flag = (name: string): string | undefined => {
+  const i = argv.indexOf(name)
+  return i >= 0 ? argv[i + 1] : undefined
+}
 const COLS = 100
 const ROWS = 44
-const RPC_URL = process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'
+const RPC_URL = flag('--url') ?? DEFAULT_RPC_URL
+// 断言预算与提示词的默认值来自 tui.toml [check]（经 gateway config/get），flag 可覆盖
+const boot = await fetchBoot(RPC_URL)
+setBoot(boot)
+const checkCfg = effectiveConfig().tui.check
 const PROMPT =
-  process.env.VT_PROMPT ??
+  flag('--prompt') ||
+  checkCfg.prompt ||
   '用一个 ts 代码块加三条要点，讲清 WebSocket 和 SSE 做流式输出各适合什么场景，控制在 15 行以内。'
+const TIMEOUT_MS = Number(flag('--timeout') ?? checkCfg.timeout_ms) || 150_000
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const holder: { api: AppApi | null } = { api: null }
@@ -79,7 +88,7 @@ console.log(`提问 ${PROMPT.slice(0, 40)}…`)
 const samples: number[] = []
 api.submit(PROMPT)
 
-const deadline = Date.now() + 120_000
+const deadline = Date.now() + TIMEOUT_MS
 while (!api.state().streaming && Date.now() < deadline) await sleep(5)
 const started = Date.now()
 while (api.state().streaming && Date.now() < deadline) {
@@ -120,9 +129,9 @@ check(
   [...presets].some((p) => p !== 'plain'),
   `行样式集合：${[...presets].join('/') || '(none)'}`,
 )
-check('耗时合理', elapsedMs > 200 && elapsedMs < 120_000, `整轮 ${(elapsedMs / 1000).toFixed(1)}s`)
+check('耗时合理', elapsedMs > 200 && elapsedMs < TIMEOUT_MS, `整轮 ${(elapsedMs / 1000).toFixed(1)}s`)
 
-// model 显示：权威来源是握手 initialize.result.model（回填信号），不是 VT_RPC_MODEL 环境变量
+// model 显示：权威来源是握手 initialize.result.model（回填信号），不是任何本地配置
 const bm = getBackendModel()
 check(
   '握手回填后端 model 且状态栏显示',

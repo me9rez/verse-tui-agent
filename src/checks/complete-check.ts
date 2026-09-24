@@ -17,9 +17,6 @@ import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
 import { rowsToHtml } from '../core/html.ts'
-import { loadDotEnv } from '../core/env.ts'
-
-loadDotEnv()
 
 const COLS = 100
 const ROWS = 44

@@ -3,7 +3,7 @@
  *
  * 权威来源是后端握手 `initialize.result.model`（rpc.ts 连上就问一次），
  * `/model <id>` 切换成功后 rpc.ts 也会回填。App 订阅后显示在欢迎块
- * model 行与状态栏——不再拿 VT_RPC_MODEL 环境变量当真相（那只是兜底）。
+ * model 行与状态栏——不拿任何本地配置当真相（后端握手 initialize.result.model 才是权威）。
  * mock 剧本不用它（显示走 kind 分支）。
  */
 let current = ''

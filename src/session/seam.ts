@@ -1,7 +1,7 @@
 /**
  * 会话域接缝：AgentSession 是「谁来产生流」的契约（本目录对外的类型出口）。
  * - mock.ts：本地剧本，自带节奏，离线可用（测试夹具）。
- * - rpc.ts：唯一 agent 后端——py/Agent Framework 的 JSON-RPC over WebSocket（VT_AGENT=rpc）。
+ * - rpc.ts：唯一 agent 后端——py/Agent Framework 的 JSON-RPC over WebSocket（`pnpm dev -- --rpc` 或 /rpc）。
  * - sink.ts：TurnSink 实现（一轮对话的事件 → 转写分组），与接缝同域。
  * - persist/：落盘会话（StoredSession 的存储/记录/重放，与运行时 AgentSession 是两回事）。
  */

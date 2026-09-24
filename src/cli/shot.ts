@@ -1,9 +1,11 @@
 /**
  * 出图快照：把 demo 跑完后的终端 buffer 转成带颜色的 HTML，供截图/归档。
  *
- *   node src/cli/shot.ts                   # 默认 110x32，mock 剧本
- *   VT_SHOT_ROWS=64 node src/cli/shot.ts   # 更高视口，一轮内容全装下
- *   VT_SHOT_PROMPT=/long node src/cli/shot.ts
+ *   node src/cli/shot.ts                        # 默认 110x32，mock 剧本
+ *   node src/cli/shot.ts --rows 64              # 更高视口，一轮内容全装下
+ *   node src/cli/shot.ts --prompt /long         # 多轮用 ';;' 分隔
+ *   --cols <n> · --speed <n> · --mid-tool · --url <ws://…>
+ *   视口/提示的默认值来自 ~/.verse/tui.toml 的 [shot] 节（经 gateway config/get）。
  *
  * 产物：.artifacts/demo.html + .artifacts/demo-screen.txt
  * 截图：chrome --headless=new --screenshot=demo.png file://.../demo.html
@@ -14,23 +16,30 @@ import { App, type AppApi } from '../ui/App.ts'
 import { HEADER_LABEL } from '../core/brand.ts'
 import { styles } from '../core/theme.ts'
 import { rowsToHtml, type CellLike } from '../core/html.ts'
-import { loadDotEnv } from '../core/env.ts'
+import { DEFAULT_RPC_URL, effectiveConfig, fetchBoot, setBoot } from '../core/config.ts'
 
-// .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
-loadDotEnv()
+const argv = process.argv.slice(2)
+const flag = (name: string): string | undefined => {
+  const i = argv.indexOf(name)
+  return i >= 0 ? argv[i + 1] : undefined
+}
+// 配置经 gateway（tui.toml [shot]）；离线时用内置默认。
+const boot = await fetchBoot(flag('--url') ?? DEFAULT_RPC_URL)
+setBoot(boot)
+const shot = effectiveConfig().tui.shot
 
-
-const COLS = Number(process.env.VT_SHOT_COLS ?? 110)
-const ROWS = Number(process.env.VT_SHOT_ROWS ?? 32)
+const COLS = Number(flag('--cols') ?? shot.cols)
+const ROWS = Number(flag('--rows') ?? shot.rows)
 // 多轮：用 ;; 分隔（例：'这个 demo 怎么做的？;;/fold'），每轮等跑完再发下一轮
-const PROMPTS = (process.env.VT_SHOT_PROMPT ?? '这个 demo 的流式输出是怎么实现的？')
+const PROMPTS = (flag('--prompt') ?? shot.prompt)
   .split(';;')
   .map((p) => p.trim())
   .filter(Boolean)
-const speed = Number(process.env.VT_SPEED ?? '0.05') || 0.05
+// 出图节奏不吃 tui.speed（那是交互动画倍率）：--speed > 内置 0.05
+const speed = Number(flag('--speed') ?? '0.05') || 0.05
 // 中途快照：等某个工具组展开（= 一轮正跑到工具阶段）就立刻出图，不等整轮结束。
 // 用来拍「流式中只有当前组是展开的」这个状态。
-const midTool = process.env.VT_SHOT_MIDTOOL === '1'
+const midTool = argv.includes('--mid-tool') || shot.mid_tool
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -73,7 +82,7 @@ for (const prompt of PROMPTS) {
   while (!api.state().streaming && Date.now() < deadline) await sleep(5)
   if (midTool) {
     // 等到「有工具组正展开」的那一帧就停手：那一刻正是「当前组展开、前面的已收起」。
-    // 配合 VT_SPEED 放慢节奏，抓到的就是一个稳定的流式中状态。
+    // 配合 --speed 放慢节奏，抓到的就是一个稳定的流式中状态。
     while (Date.now() < deadline) {
       if (api.groups().some((g) => g.kind === 'tool' && !g.collapsed)) break
       await sleep(10)

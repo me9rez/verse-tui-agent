@@ -1,11 +1,14 @@
 /**
  * 交互式入口：真终端 + alternate screen。
  *
- *   pnpm dev                             # 本地剧本（离线）
- *   VT_AGENT=rpc pnpm dev   # 唯一 agent 后端（先 pnpm backend 起服务）
+ *   pnpm dev                  # 本地剧本（离线，默认）
+ *   pnpm dev -- --rpc          # 唯一 agent 后端（先 pnpm backend 起服务）
  *
- * 环境变量：
- *   VT_SPEED=2   流式节奏倍数（1 默认，0.3 更快）
+ * 启动 flag（每次运行覆盖 tui.toml；pnpm 会吞 flag，必须写 `--` 分隔）：
+ *   --rpc / --mock   会话类型        --speed <n>   流式节奏倍数（1 默认，0.3 更快）
+ *   --url <ws://…>   gateway 地址（默认 ws://127.0.0.1:8765）
+ *   --continue/-c · --session <id|last> · --list-sessions · --debug-input
+ * 配置唯一来源 = gateway 的 config/get（连不上用内置默认）；文件见 ~/.verse/tui.toml。
  */
 import {
   createStdinDriver,
@@ -16,24 +19,29 @@ import {
 } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { rendererPalette, styles } from '../core/theme.ts'
-import { loadDotEnv } from '../core/env.ts'
-import { listSessions, sessionDir } from '../session/persist/index.ts'
+import { DEFAULT_RPC_URL, effectiveConfig, fetchBoot, setBoot } from '../core/config.ts'
+import { listSessions, sessionDir, setSessionDir } from '../session/persist/index.ts'
 import { formatStamp } from '../core/text.ts'
-
-// .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
-loadDotEnv()
 
 // ── 启动参数 ──────────────────────────────────────────────────────────────
 // 只有 --list-sessions 不需要 TTY（列完就退出），其余参数交给组件层。
 const argv = process.argv.slice(2)
+const flag = (name: string): string | undefined => {
+  const i = argv.indexOf(name)
+  return i >= 0 ? argv[i + 1] : undefined
+}
 const wantList = argv.includes('--list-sessions')
-// 两种入口都支持：命令行 flag（node src/cli/terminal.ts --continue）与 VT_* 环境变量。
-// 环境变量这条是给 `pnpm dev` 用的——`pnpm dev --continue` 会被 pnpm 自己吞掉，传不进脚本。
-const wantContinue = argv.includes('--continue') || argv.includes('-c') || process.env.VT_CONTINUE === '1'
-const sessionArg = (() => {
-  const i = argv.findIndex((a) => a === '--session' || a === '-s')
-  return (i >= 0 ? argv[i + 1] : undefined) ?? process.env.VT_SESSION
-})()
+// pnpm 会吞掉 flag，一律用 `pnpm dev -- <flag>` 形式传入。
+const wantContinue = argv.includes('--continue') || argv.includes('-c')
+const sessionArg = flag('--session') ?? flag('-s')
+const rpcUrl = flag('--url') ?? DEFAULT_RPC_URL
+
+// 配置唯一来源是 gateway 的 config/get；连不上（离线 mock）就用内置默认，不报错。
+// 必须在 --list-sessions 之前：列表用的会话目录来自 tui 配置。
+const boot = await fetchBoot(rpcUrl)
+setBoot(boot)
+const cfg = effectiveConfig()
+if (cfg.tui.session_dir) setSessionDir(cfg.tui.session_dir)
 
 if (wantList) {
   const all = listSessions()
@@ -64,9 +72,9 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 
 const cols = Math.max(MIN_COLS, process.stdout.columns || 100)
 const rows = Math.max(MIN_ROWS, process.stdout.rows || 30)
-const requested = (process.env.VT_AGENT ?? '').toLowerCase()
-const useRpc = requested === 'rpc'
-const speed = Number(process.env.VT_SPEED ?? '1') || 1
+const useRpc = argv.includes('--rpc') || (!argv.includes('--mock') && cfg.tui.agent === 'rpc')
+const speed = Number(flag('--speed') ?? cfg.tui.speed) || 1
+const debugInput = argv.includes('--debug-input') || cfg.tui.debug_input
 
 let exiting = false
 
@@ -78,6 +86,8 @@ const app = createTerminalApp({
     sessionId: sessionArg ?? (wantContinue ? 'last' : undefined),
     sessionKind: useRpc ? 'rpc' : 'mock',
     speed,
+    persist: cfg.tui.persist,
+    debugInput,
     onReady(_api: AppApi) {
       /* 交互模式下不需要句柄 */
     },

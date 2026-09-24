@@ -3,21 +3,18 @@ import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
 import { rowsToHtml } from '../core/html.ts'
-import { loadDotEnv } from '../core/env.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
-loadDotEnv()
-process.env.VT_NO_PERSIST = '1'
-
-const ROWS = Number(process.env.VT_SHOT_ROWS ?? 30)
-const COLS = Number(process.env.VT_SHOT_COLS ?? 100)
+// 视口可用 argv 覆盖：node src/probes/welcomedump.ts [rows] [cols]
+const ROWS = Number(process.argv[2] ?? 30)
+const COLS = Number(process.argv[3] ?? 100)
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const holder: { api: AppApi | null } = { api: null }
 const app = createTerminalApp({
   cols: COLS,
   rows: ROWS,
   component: App,
-  props: { sessionKind: 'mock', speed: 0, onReady: (n: AppApi) => { holder.api = n } },
+  props: { sessionKind: 'mock', speed: 0, persist: false, onReady: (n: AppApi) => { holder.api = n } },
   defaultStyle: styles.text,
 })
 app.mount()

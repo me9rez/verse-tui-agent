@@ -23,10 +23,10 @@ import { createTurnSink, type Phase } from '../session/sink.ts'
 import { createTranscriptStore, type TranscriptStore } from '../transcript/index.ts'
 import { createMockSession } from '../session/mock.ts'
 import { createRpcSession } from '../session/rpc.ts'
-import { onBackendModel } from '../session/model.ts'
+import { getBackendModel, onBackendModel } from '../session/model.ts'
 import { onBackendMode } from '../session/mode.ts'
 import type { AgentSession } from '../session/seam.ts'
-import { describeProvider, dotEnvResult } from '../core/env.ts'
+import { DEFAULT_RPC_URL, effectiveConfig, getBoot } from '../core/config.ts'
 import { styles } from '../core/theme.ts'
 import { APP_ART, APP_VERSION } from '../core/brand.ts'
 import { cellWidth, formatDuration, formatStamp } from '../core/text.ts'
@@ -77,6 +77,8 @@ export const App = defineComponent({
     sessionId: { type: String, default: '' },
     /** false 时完全不动磁盘（测试与 tui.toml persist=false 走这里） */
     persist: { type: Boolean, default: true },
+    /** 原始提交文本按 JSON 记入 .artifacts/input-debug.log（tui.toml debug_input / --debug-input） */
+    debugInput: { type: Boolean, default: false },
     onReady: { type: Function as PropType<(api: AppApi) => void>, default: undefined },
     onExit: { type: Function as PropType<() => void>, default: undefined },
   },
@@ -119,10 +121,10 @@ export const App = defineComponent({
     onBackendModel((m) => {
       backendModel.value = m
     })
-    /** 欢迎块/状态栏显示的 model：rpc = 后端确认的 id（没连上先用 env 兜底）；mock = 离线剧本 */
+    /** 欢迎块/状态栏显示的 model：rpc = 后端确认的 id（没连上显示「连接后端中…」）；mock = 离线剧本 */
     const displayModel = computed(() =>
       sessionRef.value.kind === 'rpc'
-        ? backendModel.value || process.env.VT_RPC_MODEL || '连接后端中…'
+        ? backendModel.value || '连接后端中…'
         : '离线剧本',
     )
 
@@ -167,12 +169,9 @@ export const App = defineComponent({
 
     const providerInfo = (kind: SessionKind): { host?: string; model?: string } => {
       if (kind !== 'rpc') return {} // mock 是离线剧本，没有 provider
-      const rpcUrl = process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'
-      try {
-        return { host: new URL(rpcUrl).host, model: backendModel.value || (process.env.VT_RPC_MODEL ?? 'harness(rpc)') }
-      } catch {
-        return { host: rpcUrl }
-      }
+      // host/model 都来自 gateway 的 config/get（provider 名字级信息，不存密钥）
+      const g = effectiveConfig().gateway
+      return { host: `${g.host}:${g.port}`, model: backendModel.value || effectiveConfig().default_model }
     }
 
     function startSession(kind: SessionKind, title = '新会话'): StoredSession {
@@ -289,7 +288,7 @@ export const App = defineComponent({
     async function handleSubmit(raw: string): Promise<void> {
       // 去掉控制字符（终端注入的键序列可能带 bracketed-paste / 残余 CR 标记）
       const cleaned = stripControlChars(raw)
-      if (process.env.VT_DEBUG_INPUT === '1') {
+      if (props.debugInput) {
         // 排查输入层问题时用：把原始文本按 JSON 记下来（含不可见字符）
         try {
           appendFileSync('.artifacts/input-debug.log', JSON.stringify({ raw, cleaned }) + NL, 'utf8')
@@ -372,8 +371,9 @@ export const App = defineComponent({
           store.addNote('已切回本地剧本。')
         } else if (cmd === '/rpc') {
           sessionRef.value = makeSession('rpc')
+          const g = effectiveConfig().gateway
           store.addNote(
-            `已切到远端 harness 后端：${process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'}（历史在服务端落盘）`,
+            `已切到远端 harness 后端：ws://${g.host}:${g.port}（历史在服务端落盘）`,
           )
         } else if (cmd === '/fold') {
           const collapsed = store.toggleAllGroups()
@@ -399,12 +399,16 @@ export const App = defineComponent({
             }
           }
         } else if (cmd === '/env') {
-          const p = describeProvider()
-          const dot = dotEnvResult()
+          // 配置展示的唯一来源：gateway 的 config/get（脱敏视图 + 实际读到的 toml）
+          const b = getBoot()
+          const c = effectiveConfig()
+          if (!b) store.addNote(`gateway 未连接（${DEFAULT_RPC_URL}）：以下为内置默认；--url 可改地址。`)
           for (const line of [
-            `后端  ${p.baseUrl} · model ${p.model} · key 由后端持有（前端不接触）`,
-            `agent 工作区  ${p.agentRoot}`,
-            `.env  ${dot.files.length ? `${dot.files.join(' + ')}（带入 ${dot.keys.length} 个键：${dot.keys.join(', ')}）` : '未发现（可复制 .env.example）'}`,
+            `gateway  ${c.gateway.host}:${c.gateway.port} · model ${getBackendModel() || c.default_model} · key 由后端持有（前端不接触）`,
+            `providers  ${c.providers.map((p) => `${p.name}(${p.type}) key ${p.api_key || '未设'}`).join(' · ') || '（无）'}`,
+            `agent 工作区  ${c.gateway.workspace || '(后端默认 <repo>/.agent-sandbox)'}`,
+            `tui  agent=${c.tui.agent} speed=${c.tui.speed} persist=${c.tui.persist}${c.tui.session_dir ? ` · session_dir=${c.tui.session_dir}` : ''}`,
+            `配置文件  ${b ? (b.sources.length ? b.sources.join(' + ') : '无（全部默认值）') : '(未取到)'}`,
           ]) store.addNote(line)
         } else if (cmd === '/long') {
           void runTurn('/long')

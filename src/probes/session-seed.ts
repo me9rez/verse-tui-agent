@@ -1,9 +1,13 @@
 /**
  * 探针：往会话目录里塞一条演示会话，用来手工验证 /sessions 与 --list-sessions 的输出。
  *
- *   VT_SESSION_DIR=$LOCALAPPDATA/Temp/vs-demo node src/probes/session-seed.ts
+ *   node src/probes/session-seed.ts [会话目录]
+ * 不传目录 = 默认 <repo>/.verse-sessions（tui.toml session_dir 经 gateway 注入时用那份）。
  */
-import { saveSession, sessionDir } from '../session/persist/index.ts'
+import { saveSession, sessionDir, setSessionDir } from '../session/persist/index.ts'
+
+const dirArg = process.argv[2]
+if (dirArg) setSessionDir(dirArg)
 
 const now = new Date().toISOString()
 const path = saveSession({
