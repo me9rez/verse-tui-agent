@@ -20,9 +20,10 @@
 import type { AgentSession, ToolStep, TurnContext } from './seam.ts'
 import { setBackendModel } from './model.ts'
 import { setBackendMode } from './mode.ts'
+import { DEFAULT_RPC_URL, setBoot, type VerseBoot } from '../core/config.ts'
 
 export type RpcOptions = {
-  /** 后端地址，默认 ws://127.0.0.1:8765（也可用 VT_RPC_URL） */
+  /** 后端地址，默认 DEFAULT_RPC_URL（客户端不读配置文件，改端口用 --url） */
   url?: string
 }
 
@@ -45,7 +46,7 @@ type Pending = {
 const CONNECT_TIMEOUT_MS = 5000
 
 export function createRpcSession(opts: RpcOptions = {}): AgentSession {
-  const url = opts.url ?? process.env.VT_RPC_URL ?? 'ws://127.0.0.1:8765'
+  const url = opts.url ?? DEFAULT_RPC_URL
   let label = url
   try {
     label = new URL(url).host
@@ -148,6 +149,10 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
             const m = (r as { model?: unknown } | null)?.model
             if (typeof m === 'string' && m) setBackendModel(m)
           })
+          .catch(() => {})
+        // 配置也从后端拿（唯一来源：config/get 的脱敏视图；失败则维持 BUILTIN）
+        rpcCall(sock, 'config/get')
+          .then((r) => setBoot((r ?? null) as VerseBoot | null))
           .catch(() => {})
         refreshMode(sock)
       }
