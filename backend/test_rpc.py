@@ -9,6 +9,7 @@
   6. 错误路径：method not found、坏 prompt
   7. model：initialize 权威回显、model/set 切换跟随、空值 -32602
   8. mode：plan/execute 默认值、切换与持久、同值不重发、非法值 -32602
+  9. config/get：providers 的 api_key 脱敏、sources 为 toml 绝对路径、tui 段完整
 
 跑法：先起 rpc_server.py，再 python test_rpc.py
 """
@@ -69,6 +70,28 @@ async def main() -> int:
         check("initialize", ok, str(r.get("result") or r.get("error"))[:120])
         r = await rpc.call("ping", timeout=10)
         check("ping", r.get("result", {}).get("pong") is True, str(r.get("result")))
+
+        # 1.5 config/get：脱敏配置视图（协议扩展；旧服务无此方法 → 下面三项 FAIL）
+        r = await rpc.call("config/get", timeout=10)
+        res = r.get("result") or {}
+        cfg = res.get("config") or {}
+        check(
+            "config/get 的 api_key 已脱敏",
+            isinstance(cfg.get("providers"), list)
+            and all(p.get("api_key") in ("", "***set***") for p in cfg["providers"]),
+            str(r.get("error") or cfg.get("providers"))[:120],
+        )
+        check(
+            "config/get.sources 是 toml 绝对路径",
+            isinstance(res.get("sources"), list) and all(s.endswith(".toml") for s in res["sources"]),
+            str(res.get("sources")),
+        )
+        tui = cfg.get("tui") or {}
+        check(
+            "config/get 含 tui 段",
+            tui.get("agent") in ("mock", "rpc") and isinstance(tui.get("speed"), (int, float)) and tui.get("speed", 0) >= 0,
+            str(tui.get("agent")),
+        )
 
         # 2. 第一轮：流式事件 + 最终 result
         r = await rpc.call("agent/chat", {"session": SID, "prompt": "记住：我叫小明，最喜欢蓝色。一句话确认。"})

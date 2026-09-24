@@ -23,6 +23,10 @@ JSON-RPC 2.0 over WebSocket 协议
         影响后续所有轮次）；plan/todos 随 harness 重建重置，磁盘历史不受影响。
         有轮次在跑时拒绝（-32003）；空 model → -32602。
         initialize.result.model 是当前 model 的权威回显，客户端据此显示。
+  {"jsonrpc":"2.0","id":4,"method":"config/get"}
+      → {"result":{"config":<脱敏视图>,"sources":[实际读到的 toml 绝对路径]}}
+      → config.providers[].api_key 恒为 "***set***"|"",明文永不下发；
+        gateway.workspace/history 为服务端解析后的绝对路径；tui = TUI 偏好生效值。
   {"jsonrpc":"2.0","id":8,"method":"mode/get","params":{"session":"<sid>"}}
       → 应答 {"result":{"session":"<sid>","mode":"plan"|"execute"}}
   {"jsonrpc":"2.0","id":9,"method":"mode/set","params":{"session":"<sid>","mode":"plan"|"execute"}}
@@ -57,15 +61,12 @@ JSON-RPC 2.0 over WebSocket 协议
 客户端按请求 id 把事件归到当前轮，终态到达即该轮结束。
 ════════════════════════════════════════════════════════════════
 
-配置（环境变量，全部可选，密钥绝不打印）：
-  AGENT_RPC_HOST=127.0.0.1     仅监听本机；改 0.0.0.0 前先想清楚安全边界
-  AGENT_RPC_PORT=8765
-  AGENT_RPC_PROVIDER=wb2api    wb2api | openai(Responses API 端点)
-  AGENT_RPC_BASE_URL           默认按 provider 取
-  AGENT_RPC_MODEL=cn:hy3
-  AGENT_RPC_API_KEY            默认取 HERMES_CUSTOM_WORKBUDDY_PROXY_API_KEY
-  AGENT_RPC_HISTORY            历史目录（默认 <backend>/history，每 session 一个 JSONL）
-  AGENT_RPC_WORKSPACE          agent 工具工作区（默认 <repo>/.agent-sandbox）
+配置（唯一来源 = TOML 文件，实现见 config.py；没有任何业务环境变量）：
+  $VERSE_HOME/config.toml    默认 ~/.verse/config.toml   providers/models/gateway/默认值
+  $VERSE_HOME/tui.toml       默认 ~/.verse/tui.toml      TUI 偏好（agent/speed/persist/shot/check）
+  <repo>/.verse/local.toml   项目级覆盖（标量替换、表递归深合并）
+  唯一环境变量 VERSE_HOME = 换配置目录，不参与业务配置。坏文件 = 警告+回退默认，不中断启动。
+  密钥：providers.<name>.api_key 明文存文件；config/get 只下发 "***set***"|"",明文永不外传。
 """
 from __future__ import annotations
 
@@ -84,37 +85,29 @@ from websockets.asyncio.server import serve
 
 from agent_framework import FileHistoryProvider, create_harness_agent, get_agent_mode, set_agent_mode
 
-HERE = Path(__file__).resolve().parent
-HOST = os.environ.get("AGENT_RPC_HOST", "127.0.0.1")
-PORT = int(os.environ.get("AGENT_RPC_PORT", "8765"))
-PROVIDER = os.environ.get("AGENT_RPC_PROVIDER", "wb2api").lower()
-WORKSPACE = Path(os.environ.get("AGENT_RPC_WORKSPACE") or HERE.parent / ".agent-sandbox")
-HISTORY_DIR = Path(os.environ.get("AGENT_RPC_HISTORY") or HERE / "history")
-MAX_RUN_SECONDS = 300
+from config import ConfigError, load_config, resolve_provider_key, sanitize
 
-# ── provider 装配 ─────────────────────────────────────────────────────
-# 唯一允许的 agent 底座：agent-framework 的 create_harness_agent。
-# 新增模型接入 = 在这里加一个 provider 分支，不改协议、不改事件模型。
-if PROVIDER == "wb2api":
-    BASE_URL = os.environ.get("AGENT_RPC_BASE_URL", "http://127.0.0.1:7863/v1")
-    MODEL = os.environ.get("AGENT_RPC_MODEL", "cn:hy3")
-    API_KEY = os.environ.get("AGENT_RPC_API_KEY") or os.environ.get(
-        "HERMES_CUSTOM_WORKBUDDY_PROXY_API_KEY", ""
-    )
-else:  # openai：Responses API 端点（OpenAIChatClient，STORES_BY_DEFAULT=True）
-    BASE_URL = os.environ.get("AGENT_RPC_BASE_URL", "https://88api.ai/v1")
-    MODEL = os.environ.get("AGENT_RPC_MODEL", "deepseek-v4.1-flash")
-    API_KEY = os.environ.get("AGENT_RPC_API_KEY") or os.environ.get(
-        "HERMES_CUSTOM_88API_API_KEY", ""
-    )
+HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parent
+
+# ── 配置装配：唯一来源是 TOML（见 config.py）────────────────────────
+CFG, TUI, CFG_FILES = load_config(REPO_ROOT)
+GW = CFG["gateway"]
+HOST = str(GW.get("host", "127.0.0.1"))
+PORT = int(GW.get("port", 8765))
+WORKSPACE = Path(GW["workspace"]) if GW.get("workspace") else REPO_ROOT / ".agent-sandbox"
+HISTORY_DIR = Path(GW["history"]) if GW.get("history") else HERE / "history"
+MAX_RUN_SECONDS = 300
 
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-# 工具的文件/命令落在工作区（等价前端的 VT_AGENT_ROOT），与历史文件分开
+WORKSPACE, HISTORY_DIR = WORKSPACE.resolve(), HISTORY_DIR.resolve()
+GW["workspace"], GW["history"] = str(WORKSPACE), str(HISTORY_DIR)  # config/get 展示解析后路径
+# 工具的文件/命令落在工作区，与历史文件分开
 os.chdir(WORKSPACE)
 
 logging.basicConfig(
-    level=os.environ.get("AGENT_RPC_LOG", "INFO"),
+    level=str(GW.get("log_level", "INFO")).upper(),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 # 框架的 ExperimentalWarning 对使用者无意义（FileHistoryProvider 标记为实验特性），只降级不隐藏错误
@@ -123,39 +116,78 @@ logging.getLogger("agent_framework").addFilter(
 )
 log = logging.getLogger("verse-agent-rpc")
 
-if PROVIDER == "wb2api":
-    from agent_framework.openai import OpenAIChatCompletionClient as _ClientCls
-else:
-    from agent_framework.openai import OpenAIChatClient as _ClientCls
+DEFAULT_MODEL_ALIAS = str(CFG.get("default_model", ""))
+DEFAULT_MODE = str(CFG.get("default_mode", "plan"))
 
-def _build_agent(model: str):
-    """按指定 model 造 chat client + harness agent（启动时与 model/set 切换时共用）。
+def _resolve(model_ref: str) -> tuple[str, str, dict]:
+    """model ref（[models] 别名，或裸 model id）→ (provider 名, 真实 model id, provider 表)。"""
+    mdef = CFG["models"].get(model_ref)
+    if mdef is None:  # 裸 id：绑到 default_model 所属 provider（向后兼容 model/set 传裸 id）
+        d = CFG["models"].get(DEFAULT_MODEL_ALIAS)
+        if d is None:
+            raise ConfigError(f"default_model {DEFAULT_MODEL_ALIAS!r} 不在 [models] 里（检查 config.toml）")
+        pname, raw = str(d["provider"]), model_ref
+    else:
+        pname, raw = str(mdef["provider"]), str(mdef["model"])
+    pdef = CFG["providers"].get(pname)
+    if pdef is None:
+        raise ConfigError(f"providers 里没有 {pname!r}（检查 config.toml / local.toml）")
+    return pname, raw, pdef
+
+
+def _build_agent(model_ref: str):
+    """按 model ref 造 chat client + harness agent（启动、model/set、惰性重建共用）。
 
     切换 = 整体重建：plan/todos（内存 SessionStore）随之重置，
     对话历史在 FileHistoryProvider 磁盘 JSONL 里不受影响。
     """
-    cli = _ClientCls(model=model, base_url=BASE_URL, api_key=API_KEY or None)
+    pname, raw, pdef = _resolve(model_ref)
+    api_key = resolve_provider_key(pdef)
+    if not api_key:
+        raise ConfigError(f"provider {pname!r} 没有 api_key（providers.{pname}.api_key 或其 env 子表）")
+    if str(pdef.get("type", "openai")).lower() == "openai_responses":
+        from agent_framework.openai import OpenAIChatClient as ClientCls  # Responses API
+    else:
+        from agent_framework.openai import OpenAIChatCompletionClient as ClientCls  # Chat Completions
+    cli = ClientCls(model=raw, base_url=(pdef.get("base_url") or None), api_key=api_key)
     ag = create_harness_agent(
         cli,
         name="verse-agent",
         # 对话历史：每 session 一个 append-only JSONL，跨连接/跨进程恢复（load_messages=True）
         history_provider=FileHistoryProvider(HISTORY_DIR),
-        # PROVIDER=openai 时 OpenAIChatClient 默认服务端存会话，会跳过本地历史加载——
-        # 88api 这类兼容端点没有服务端会话，必须显式 store=False 让本地文件成为历史唯一来源
+        # 兼容端点（wb2api/8788 等）没有服务端会话：store=False 让本地文件成为历史唯一来源
         default_options={"store": False},
         # 文件/命令工具收敛在 WORKSPACE 内，且不触发审批等待（协议没有审批通道）
         file_access_disable_write_tool_approval=True,
         file_access_disable_readonly_tool_approval=True,
         disable_web_search=True,
     )
-    return cli, ag
+    return cli, ag, raw, pname
 
 
-client, agent = _build_agent(MODEL)
-log.info(
-    "harness agent ready provider=%s model=%s base=%s history=%s workspace=%s",
-    PROVIDER, MODEL, BASE_URL, HISTORY_DIR, WORKSPACE,
-)
+# ── 启动装配（惰性）──────────────────────────────────────────────────
+# 配置缺失/无 key 不再让进程崩掉：config/get 照常可用，首条需要 agent 的请求会重试，
+# 仍失败则回 -32000 + 中文原因（而不是启动时甩一段 SettingNotFoundError 栈）。
+MODEL = DEFAULT_MODEL_ALIAS      # 当前 model 的权威回显（initialize.result.model）
+PROVIDER = ""                    # 当前 provider 表名
+client = agent = None
+
+
+def _ensure_agent() -> None:
+    """惰性装配：启动失败后的首个 chat / mode 请求在此重试（ConfigError → -32000）。"""
+    global client, agent, PROVIDER
+    if agent is None:
+        client, agent, _, PROVIDER = _build_agent(MODEL)
+
+
+try:
+    _ensure_agent()
+    log.info(
+        "harness agent ready provider=%s model=%s config=%s history=%s workspace=%s",
+        PROVIDER, MODEL, CFG_FILES or "（无，全部默认值）", HISTORY_DIR, WORKSPACE,
+    )
+except ConfigError as e:
+    log.warning("启动时未装配 agent（config/get 照常可用，需要 agent 的请求会重试）：%s", e)
 
 # ── chunk → 事件映射 ──────────────────────────────────────────────────
 # 模型的思考（chunk text_reasoning）：
@@ -183,6 +215,12 @@ def _get_session(sid: str):
     sess = _SESSION_CACHE.get(sid)
     if sess is None:
         sess = agent.create_session(session_id=sid)
+        if DEFAULT_MODE != "plan":
+            # 新会话按 config 的 default_mode 起步（notify=False：这是初始值，不是变更，不注入通知）
+            try:
+                set_agent_mode(sess, DEFAULT_MODE, notify=False)
+            except Exception as exc:  # noqa: BLE001 —— 配置值非法不致命，回落框架默认 plan
+                log.warning("default_mode=%r 应用失败，回落默认 plan：%s", DEFAULT_MODE, exc)
         _SESSION_CACHE[sid] = sess
     return sess
 
@@ -260,6 +298,11 @@ async def handle_chat(ws, rid, params, tasks, send_lock) -> None:
     if not isinstance(prompt, str) or not prompt.strip():
         await _send(ws, send_lock, _err(rid, -32602, "params.prompt 必须是非空字符串"))
         return
+    try:
+        _ensure_agent()   # 参数校验之后才装配：坏参数仍回 -32602，配置缺失才 -32000
+    except ConfigError as e:
+        await _send(ws, send_lock, _err(rid, -32000, str(e)))
+        return
 
     async def run():
         try:
@@ -299,8 +342,8 @@ async def _send(ws, lock, payload: dict[str, Any]) -> None:
 
 async def handler(ws) -> None:
     """一条连接的收发循环：请求分发 + 每连接串行化发送。"""
-    # model/set 会换掉模块级的 MODEL/client/agent（全局，只加不改的协议扩展）
-    global MODEL, client, agent
+    # model/set 会换掉模块级的 MODEL/PROVIDER/client/agent（全局，只加不改的协议扩展）
+    global MODEL, PROVIDER, client, agent
     remote = getattr(ws, "remote_address", None)
     log.info("连接 %s", remote)
     send_lock = asyncio.Lock()
@@ -342,7 +385,7 @@ async def handler(ws) -> None:
                                                 "result": {"cancelled": cancelled}})
             elif method == "agent/reset":                   # 清掉该会话的服务端内存状态
                 sid = str(params.get("session") or "")
-                if sid in agent._sessions:
+                if agent is not None and sid in agent._sessions:
                     agent._sessions.pop(sid, None)
                 _SESSION_CACHE.pop(sid, None)
                 if rid is not None:
@@ -355,7 +398,10 @@ async def handler(ws) -> None:
                     "server": "verse-agent-backend", "version": "1.0.0",
                     "provider": PROVIDER, "model": MODEL,
                     "methods": ["initialize", "ping", "agent/chat", "agent/cancel", "agent/reset",
-                                "model/set", "mode/get", "mode/set"]}})
+                                "model/set", "mode/get", "mode/set", "config/get"]}})
+            elif method == "config/get":                   # 脱敏配置视图 + 实际读到的 toml（明文 key 永不下发）
+                await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                    "config": sanitize(CFG, TUI), "sources": CFG_FILES}})
             elif method == "model/set":                    # 切服务端默认模型（重建 client+harness）
                 new_model = str(params.get("model") or "").strip()
                 if not new_model:
@@ -364,13 +410,22 @@ async def handler(ws) -> None:
                     # 本连接有轮次在跑：重建 harness 会把进行中的会话对象抽掉
                     await _send(ws, send_lock, _err(rid, -32003, "本连接有轮次在跑，等本轮结束再 model/set"))
                 else:
-                    MODEL = new_model
-                    client, agent = _build_agent(MODEL)
-                    _SESSION_CACHE.clear()   # 旧会话对象的 provider state 归属旧 agent，一并丢弃
-                    log.info("model 切换为 %s（harness 已重建，plan/todos/mode 重置，磁盘历史保留）", MODEL)
-                    await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
-                        "model": MODEL, "provider": PROVIDER, "rebuilt": True}})
-            elif method == "mode/get":                     # 读该会话的 harness 模式（默认 plan）
+                    try:
+                        new_client, new_agent, _, pname = _build_agent(new_model)
+                    except ConfigError as e:
+                        await _send(ws, send_lock, _err(rid, -32000, str(e)))
+                    else:
+                        client, agent, MODEL, PROVIDER = new_client, new_agent, new_model, pname
+                        _SESSION_CACHE.clear()   # 旧会话对象的 provider state 归属旧 agent，一并丢弃
+                        log.info("model 切换为 %s（harness 已重建，plan/todos/mode 重置，磁盘历史保留）", MODEL)
+                        await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                            "model": MODEL, "provider": PROVIDER, "rebuilt": True}})
+            elif method == "mode/get":                     # 读该会话的 harness 模式（默认见 config default_mode）
+                try:
+                    _ensure_agent()
+                except ConfigError as e:
+                    await _send(ws, send_lock, _err(rid, -32000, str(e)))
+                    continue
                 sid = str(params.get("session") or "")
                 sess = _get_session(sid)
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
@@ -381,24 +436,29 @@ async def handler(ws) -> None:
                 if not sid or not mode:
                     await _send(ws, send_lock, _err(rid, -32602,
                                                     "params.session 与 params.mode 必须是非空字符串"))
+                    continue
+                try:
+                    _ensure_agent()
+                except ConfigError as e:
+                    await _send(ws, send_lock, _err(rid, -32000, str(e)))
+                    continue
+                sess = _get_session(sid)
+                previous = get_agent_mode(sess)
+                if mode == previous:
+                    # 同值不重发通知：set_agent_mode(notify) 会往下一轮注入 Mode changed 消息
+                    await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                        "session": sid, "mode": mode, "previous": previous,
+                        "changed": False, "notify": False}})
                 else:
-                    sess = _get_session(sid)
-                    previous = get_agent_mode(sess)
-                    if mode == previous:
-                        # 同值不重发通知：set_agent_mode(notify) 会往下一轮注入 Mode changed 消息
+                    try:
+                        set_agent_mode(sess, mode)     # 非法值抛 ValueError → -32602
+                    except ValueError as exc:
+                        await _send(ws, send_lock, _err(rid, -32602, f"非法 mode: {exc}"))
+                    else:
+                        log.info("会话 %s 模式切换 %s → %s（下一轮生效）", sid, previous, mode)
                         await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
                             "session": sid, "mode": mode, "previous": previous,
-                            "changed": False, "notify": False}})
-                    else:
-                        try:
-                            set_agent_mode(sess, mode)     # 非法值抛 ValueError → -32602
-                        except ValueError as exc:
-                            await _send(ws, send_lock, _err(rid, -32602, f"非法 mode: {exc}"))
-                        else:
-                            log.info("会话 %s 模式切换 %s → %s（下一轮生效）", sid, previous, mode)
-                            await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
-                                "session": sid, "mode": mode, "previous": previous,
-                                "changed": True, "notify": True}})
+                            "changed": True, "notify": True}})
             elif method == "ping":
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid,
                                             "result": {"pong": True}})
