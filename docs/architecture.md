@@ -26,7 +26,7 @@
 ┌─ vue-tui-demo（单仓）─────────────────────────────────────────────┐
 │                                                                  │
 │  src/  TUI（TypeScript，纯客户端）                                │
-│    cli/terminal.ts ── VT_AGENT=rpc ──┐                           │
+│    cli/terminal.ts ── pnpm dev -- --rpc ──┐                      │
 │    ui/App.ts（命令/版面/落盘编排）    │                           │
 │    session/rpc.ts ──────────────────┼── AgentSession 接缝        │
 │    checks/rpc-check.ts（无头端到端）  │                           │
@@ -69,14 +69,14 @@ vue-tui-demo/
     history/              # 运行时数据：每 session 一个 JSONL（gitignore）
     .venv/                # uv 环境（gitignore）
   docs/architecture.md    # 本文档
-  .agent-sandbox/         # agent 工具工作区（gitignore，= 前端 VT_AGENT_ROOT）
+  .agent-sandbox/         # agent 工具工作区（gitignore，= gateway.workspace 默认值）
 ```
 
 启动：
 
 ```bash
 pnpm backend              # = cd backend && uv run python rpc_server.py（首次先 uv sync）
-VT_AGENT=rpc pnpm dev     # TUI 接上；或进 TUI 后敲 /rpc
+pnpm dev -- --rpc         # TUI 接上；或 tui.toml 设 agent = "rpc"；或进 TUI 后敲 /rpc
 ```
 
 ## 4. 协议层（JSON-RPC 2.0 over WebSocket）
@@ -126,7 +126,7 @@ VT_AGENT=rpc pnpm dev     # TUI 接上；或进 TUI 后敲 /rpc
 | `mock` | **永久保留**：离线测试夹具，不是 agent 后端 | `pnpm smoke` 断言依赖；无 key 也能跑 |
 
 > `live` / `ai` 两条实现已于 2026-09-24 **删除**（连同 `live-check` / `agent-check` 套件、
-> `ai`/`@ai-sdk/*`/`zod` 依赖、`VT_LIVE`/`VT_BASE_URL`/`VT_MODEL`/`VT_API_KEY` 前端配置）；
+> `ai`/`@ai-sdk/*`/`zod` 依赖、live/base-url/model/api-key 系前端环境变量）；
 > `SessionKind` 同步收紧为 `'mock' | 'rpc'`，旧落盘会话文件里的 `live`/`ai` kind 会被跳过
 > （文件保留在磁盘，只是不再出现在 `/sessions` 列表）。见 §11。
 
@@ -181,7 +181,7 @@ agent  = create_harness_agent(
 | 想加什么 | 改哪里 | 不改哪里 |
 |---|---|---|
 | 新工具（如浏览器、SQL） | `create_harness_agent(tools=[...])` 或 Agent Framework 自带工具开关 | 协议、前端（工具行自动出现） |
-| 新模型/新 provider | `rpc_server.py` 的 provider 装配分支 + `AGENT_RPC_*` 环境变量 | 协议、事件模型 |
+| 新模型/新 provider | `config.toml` 的 `[providers."…"]` / `[models."…"]` 表（`config/get` 自动下发） | 协议、事件模型 |
 | 新交互能力（如人工审批、diff 预览） | 新事件 type + `rpc_server.py` 分发 | 已有字段/终态语义（只加不改，§4.4） |
 | 新会话后端（如多 agent 编排） | Agent Framework 层实现后仍经同一协议暴露 | 前端接缝 `AgentSession` |
 
@@ -189,30 +189,32 @@ agent  = create_harness_agent(
 
 - ❌ 在 `src/` 写工具执行、上下文拼接、提示词管理——这些是 Agent Framework/harness 的职责；
 - ❌ 绕过 `backend/` 从前端直连模型端点（`live` 路即因此删除）；
-- ❌ 在协议里传 provider 密钥（key 只存在于后端进程环境）；
+- ❌ 在协议里传 provider 密钥（key 只存在于后端 `config.toml` 与后端进程，`config/get` 只回 `***set***`）；
 - ❌ 引入第二个后端进程或第二套会话存储。
 
 新增能力的验收口径（与现有套件同标准）：**协议级断言（backend test_*）+ 无头端到端断言
 （`src/checks/`）双侧都有，断言建立在真实字节/真实文件上，不接受"函数被调用过"。**
 
-## 8. 配置
+## 8. 配置（三份 TOML，Kimi Code 同款格式）
 
-| 变量 | 默认 | 说明 |
+**环境变量方案已于 2026-09-24 废除**（`VT_*` / `AGENT_RPC_*` / `.env` 全部删除）。配置的唯一读取者是
+`backend/config.py`（Python gateway），前端经 `config/get`（JSON-RPC 2.0）拿脱敏视图。
+
+| 文件 | 内容 | 合并规则 |
 |---|---|---|
-| `AGENT_RPC_HOST` / `AGENT_RPC_PORT` | `127.0.0.1` / `8765` | 只监听本机 |
-| `AGENT_RPC_PROVIDER` | `wb2api` | `wb2api` \| `openai` |
-| `AGENT_RPC_BASE_URL` | 按 provider | OpenAI 兼容端点 |
-| `AGENT_RPC_MODEL` | `cn:hy3` | |
-| `AGENT_RPC_API_KEY` | 后端环境注入 | 绝不打印、绝不下发前端 |
-| `AGENT_RPC_HISTORY` | `backend/history` | 每 session 一个 JSONL |
-| `AGENT_RPC_WORKSPACE` | `<repo>/.agent-sandbox` | 工具文件/命令的根 |
-| `VT_AGENT` | — | 前端：`rpc` 即接本后端 |
-| `VT_RPC_URL` | `ws://127.0.0.1:8765` | |
+| `~/.verse/config.toml` | `default_model` / `[gateway]`（host/port/workspace/history）/ `[providers."…"]` / `[models."…"]` | 基底 |
+| `~/.verse/tui.toml` | `agent` / `speed` / `persist` / `session_dir` / `debug_input` / `[shot]` / `[check]` | 独立文件 |
+| `<repo>/.verse/local.toml` | 项目级覆盖（同 schema） | 深合并覆盖前两者 |
+
+- 唯一环境变量 `VERSE_HOME`：整体换数据目录（对标 Kimi `KIMI_CODE_HOME`）。
+- 一次性覆盖用 CLI flag：`--rpc/--mock`、`--speed`、`--url`、`--continue`、`--session`、`--debug-input`。
+- 坏 TOML 只警告 + 回退默认；无 key 启动不崩（惰性装配，首次真实调用时报 -32000 中文错误）。
+- 例文件：仓库根 `config.example.toml` / `tui.example.toml`；测试：`pnpm config-test`（19 项）。
 
 ## 9. 安全边界
 
 1. 服务只绑 `127.0.0.1`；改 `0.0.0.0` 前必须先加认证（当前协议**无鉴权**，是本机回环假设的一部分）；
-2. 密钥单向流动：环境 → 后端进程 → provider，日志/协议/前端三个出口都不出现；
+2. 密钥单向流动：`config.toml` → 后端进程 → provider，日志/协议/前端三个出口都不出现（`config/get` 只回 `***set***`）；
 3. agent 文件/命令工具限定在 `WORKSPACE`；会话文件是明文（gitignore），别让 agent 把敏感内容写进对话；
 4. `history/` 与 `.verse-sessions/` 均已 gitignore。
 
@@ -223,7 +225,7 @@ agent  = create_harness_agent(
 | `backend/test_rpc.py` | 握手/流式/跨轮上下文/工具事件/取消-32001/错误码 | 11 | **11/11** |
 | `backend/test_switch.py` | 会话切换/隔离/重连恢复 | 6 | **6/6** |
 | `pnpm rpc` | TUI↔后端真实链路（真实模型） | 6 | **6/6** |
-| `pnpm smoke` | mock 渲染链路 + .env 行为（回归，离线） | 全套 | PASS |
+| `pnpm smoke` | mock 渲染链路（回归，离线） | 20 | PASS |
 | `pnpm sessions` | 会话落盘/重放（回归） | 24 | **24/24** |
 | `pnpm typecheck` | `tsc -p`（`src/probes/complete.ts` 的既有报错为仓库遗留，与本方向无关） | — | 本次改动 0 错 |
 
@@ -232,15 +234,19 @@ agent  = create_harness_agent(
 **已完成（本方向的验收项）**：
 
 - [x] 后端迁入 `backend/`，`pnpm backend` 一键起（uv 管依赖，独立 venv）
-- [x] 前端 `VT_AGENT=rpc` / `/rpc` 为真实 agent 唯一入口；协议测试与端到端全绿
+- [x] 前端 `pnpm dev -- --rpc` / `/rpc` 为真实 agent 唯一入口；协议测试与端到端全绿
 - [x] 三处合并回归修复并有断言覆盖：cancel 应答 + -32001、同会话忙守卫 -32003、测试随机 sid（防历史跨次污染）
 - [x] 本 `docs/architecture.md` 成为方向的 single source of truth
 - [x] **删除 `live`/`ai` 两条会话实现**（2026-09-24）：`liveSession.ts`/`aiSdkSession.ts`/
       `live-check.ts`/`agent-check.ts`/`debug-agent.ts` 删除，`ai`+`@ai-sdk/openai-compatible`+
-      `zod` 依赖移除，`/live` `/ai` 命令与 `VT_LIVE` 系配置清理，README 同步；
+      `zod` 依赖移除，`/live` `/ai` 命令与 live 系环境变量清理，README 同步；
       验收：全仓 typecheck 0 错、smoke/sessions/rpc/shot 全绿、README 无残留引用
 - [x] **`SessionKind` 收紧为 `'rpc' | 'mock'`**（2026-09-24）：旧 `live`/`ai` kind 的
       `.verse-sessions` 文件被校验器跳过（磁盘文件不删）
+- [x] **配置迁移：env → 三份 TOML**（2026-09-24）：`VT_*`/`AGENT_RPC_*`/`.env` 全废，
+      gateway `config.py` 独占读取 + `config/get` 下发，`env.ts`/`env-check.ts`/`.env.example`
+      删除；无 key 启动改惰性装配；验收：typecheck 0 错、smoke/sessions/complete/shot/两套
+      backend 测试（24+6）/`pnpm rpc` 全绿、全仓 grep 无业务环境变量残留
 
 **待决策（不在本次范围，需单独排期）**：
 

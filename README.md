@@ -1,7 +1,7 @@
 # Verse · 终端流式 agent
 
 > 用 Vue 3 + [`@simon_he/vue-tui`](https://vue-tui.pages.dev/) 搭的终端 AI agent 界面：思考流、真实执行的工具调用、逐行增量渲染的 markdown，思考 / 工具块可折叠。
-> A streaming terminal agent UI in Vue 3 — think / tool-call / answer panes with collapsible groups, provider config in `.env`, headless-verifiable.
+> A streaming terminal agent UI in Vue 3 — think / tool-call / answer panes with collapsible groups, TOML config via gateway, headless-verifiable.
 
 ![Verse](docs/demo.png)
 
@@ -16,7 +16,7 @@
 - **折叠**：每个「思考」和每次「工具调用」都是一个可折叠组，头部常驻、内容随状态显隐（`Ctrl+T` 最后一个 / `Ctrl+O` 全部 / 点标题）。
 - **工具**：工具循环与执行在唯一 agent 后端（`backend/`，Python/Agent Framework），TUI 只渲染 `tool_start/line/end` 事件，`bash` 的 stdout **边跑边写进转写**。
 - **两路会话**：离线 mock 剧本（默认，保证离线可演示）/ rpc 唯一 agent 后端 —— `/mock` `/rpc` 随时切。
-- **provider 配在 `.env`**：`.env` → `.env.local` 后者覆盖，命令行里已有的变量永不被文件覆盖。
+- **配置全在 TOML**：`~/.verse/config.toml`（provider/模型，后端读）+ `~/.verse/tui.toml`（界面偏好）+ 项目级 `.verse/local.toml` 深合并覆盖；没有业务环境变量（唯一 `VERSE_HOME` 换目录）。见「配置」一节。
 - **无头可验证**：断言脚本（smoke + rpc + 后端协议级），退出码即结论；关键结论用 `fs` 独立核对，不采信模型自述。
 
 依赖极简：`node` 直接跑 TypeScript（类型剥离），**没有打包器、没有构建步骤**。
@@ -25,64 +25,57 @@
 
 ```bash
 pnpm install
-cp .env.example .env    # 填 provider；不填也能跑（默认离线 mock 剧本）
+mkdir -p ~/.verse && cp config.example.toml ~/.verse/config.toml   # 填 provider/api_key；不填也能跑（默认离线 mock 剧本）
 pnpm dev                # 交互式（默认开一个新会话）
 pnpm backend            # 起唯一 agent 后端（Agent Framework，ws://127.0.0.1:8765）
-VT_AGENT=rpc pnpm dev   # TUI 接上后端（真实 agent 的标准姿势，详见 docs/architecture.md）
+pnpm dev -- --rpc        # TUI 接上后端（真实 agent 的标准姿势，详见 docs/architecture.md）
 
-VT_CONTINUE=1 pnpm dev  # 接着最近一次会话继续（转写与模型上下文一起恢复）
-pnpm dev -- --list-sessions          # 列出落盘的会话（不进 TUI，无需 TTY）
+pnpm dev -- --continue          # 接着最近一次会话继续（转写与模型上下文一起恢复）
+pnpm dev -- --list-sessions     # 列出落盘的会话（不进 TUI，无需 TTY）
 pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 ```
 
-> 注意 `--continue` / `--session` 要用 `pnpm dev -- <flag>` 的形式（`pnpm dev --continue` 会被 pnpm 自己吞掉，
-> 传不进脚本）。嫌麻烦就用环境变量：`VT_CONTINUE=1` / `VT_SESSION=<id|last>`——效果一样。
+> 注意 `--continue` / `--session` / `--rpc` 这些 flag 要用 `pnpm dev -- <flag>` 的形式（`pnpm dev --continue` 会被 pnpm 自己吞掉，
+> 传不进脚本）。默认行为要改就写 `~/.verse/tui.toml`（如 `agent = "rpc"`，则 `pnpm dev` 直接接后端）。
 
 要求 **Node ≥ 22.18**（`node` 直接跑 `.ts`，靠内置类型剥离，不需要任何 flag；23.6+/24 同样可以）。
 
 | 命令 | 说明 |
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
-| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项 + `.env` 加载行为 9 项（离线，不需要 key） |
+| `pnpm smoke` | 无头：渲染 / 流式 / 折叠 / 颜色 / 落盘 20 项（离线，不需要 key） |
 | `pnpm complete` | 无头：slash 命令补全的按键链路 4 项（离线 mock） |
 | `pnpm rpc` | 无头：WebSocket JSON-RPC 后端 6 项（需先起 `pnpm backend`） |
 | `pnpm sessions` | 无头：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
+| `pnpm config-test` | 后端 TOML 配置加载 19 项（深合并/脱敏/坏文件回退，离线） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm build` | tsdown 编译 `src/cli` 两个入口到 `dist/`（`bin`: `verse` → `dist/terminal.mjs`，带 shebang 可直接执行） |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
 
-## 配置：`.env`
+## 配置：三份 TOML（Kimi Code 同款格式）
 
-provider 配置放 `.env`（已被 `.gitignore` 忽略），每个入口文件开头统一 `loadDotEnv()` 一次，之后正常读 `process.env`：
+**配置的唯一读取者是 Python gateway**（`backend/config.py`）：前端一行配置文件都不读，开机连一次
+gateway 的 `config/get`（JSON-RPC 2.0）拿脱敏视图；连不上（离线 mock）就用与后端同值的内置默认。
 
-```bash
-cp .env.example .env
-# .env
-VT_AGENT=rpc                       # mock（默认，离线）| rpc（唯一 agent 后端）
-VT_RPC_URL=ws://127.0.0.1:8765     # pnpm backend 起的服务
-VT_RPC_MODEL=cn:hy3                # 展示用；实际模型由后端 AGENT_RPC_MODEL 决定
-VT_AGENT_ROOT=./.agent-sandbox      # agent 工具工作区（后端 AGENT_RPC_WORKSPACE 默认同目录）
-VT_SPEED=1                          # 流式速度倍率，调试用
-```
+| 文件 | 读取者 | 内容 |
+|---|---|---|
+| `~/.verse/config.toml` | gateway | provider / 模型 / 端口（复制 `config.example.toml` 改） |
+| `~/.verse/tui.toml` | gateway（下发给 TUI） | `agent` / `speed` / `persist` / `session_dir` / `[shot]` / `[check]`（复制 `tui.example.toml` 改） |
+| `<repo>/.verse/local.toml` | gateway | 项目级覆盖，**深合并**（同 schema），已 gitignore |
 
-模型与密钥**不在前端配置**：它们是后端的 `AGENT_RPC_*` 环境变量（见 `docs/architecture.md` §8）。
-
-加载规则（9 项断言守着，见 `pnpm smoke` 的第二段）：
-
-| 规则 | 说明 |
-|---|---|
-| 顺序 | `.env` → `.env.local`，**后者覆盖前者** |
-| 优先级 | **命令行 / 系统里已有的键永不被文件覆盖**（`VT_MODEL=... pnpm dev` 临时换模型很方便） |
-| 坏行 | 只警告，不中断启动 |
-| 缺文件 | 静默跳过，没有 `.env` 也能跑离线 mock |
-| 密钥 | 只回报**键名**，值不进日志 / 终端 / 结果 |
+- 三者按 `默认值 ← config.toml ← 项目 local.toml` 深合并（标量替换、表递归合并）；坏 TOML 只警告并回退，不中断启动。
+- 唯一环境变量 `VERSE_HOME`：整体换数据目录（此时配置变为 `$VERSE_HOME/config.toml`），对标 Kimi 的 `KIMI_CODE_HOME`。
+- **一次性覆盖用 CLI flag**（每次运行生效）：`--rpc/--mock`、`--speed <n>`、`--url <ws://…>`、`--continue/-c`、`--session <id|last>`、`--debug-input`。
+- 模型与密钥**只在 `config.toml`**：`config/get` 只回 `***set***`（或空串），明文 key 永不出后端。
 
 进 TUI 后用 `/env` 随时看当前生效的配置（脱敏）：
 
 ```
-后端  127.0.0.1:8765 · model cn:hy3 · key 由后端持有（前端不接触）
+gateway  127.0.0.1:8765 · model cn:hy3 · key 由后端持有（前端不接触）
+providers  wb2api(openai) key ***set***
 agent 工作区  <repo>/.agent-sandbox
-.env  .env（带入 4 个键：VT_AGENT, VT_RPC_URL, VT_AGENT_ROOT, VT_SPEED）
+tui  agent=rpc speed=1 persist=true · session_dir=…
+配置文件  C:\Users\<you>\.verse\config.toml + <repo>\.verse\local.toml
 ```
 
 ## 交互
@@ -219,7 +212,6 @@ src/
     shot.ts                出图：把跑完的 buffer 转成带色 HTML（多轮用 ;; 分隔）
   checks/                断言脚本：退出码即结果
     smoke.ts               渲染 / 流式 / 折叠 / 颜色 20 项（离线 mock）
-    env-check.ts           .env 加载行为 9 项（优先级 / 覆盖 / 坏行 / 不外泄）
     rpc-check.ts           WebSocket JSON-RPC 后端 6 项（需 pnpm backend 在跑）
     complete-check.ts      slash 命令补全的按键链路 4 项（events.dispatch 注入按键）
     session-check.ts       会话落盘 / 读回 / 重放 / 记录器 24 项
@@ -242,7 +234,7 @@ src/
     store.ts               LineStream + TranscriptStore（分组、可见行过滤、版本号）
     index.ts               对外桶文件
   core/                  与界面/会话无关的底座
-    env.ts / text.ts / theme.ts / syntax.ts / html.ts / brand.ts
+    config.ts / text.ts / theme.ts / syntax.ts / html.ts / brand.ts
 ```
 
 导入方向是单向的：`checks/probes/cli → ui → session → transcript → core`（`session/persist` 的重放依赖 transcript，transcript 依赖 core 的 theme/syntax），无反向依赖、无循环。`checks/*` 与 `probes/*` 只通过 `ui/App.ts` 暴露的 `AppApi` 触碰界面，不 import 组件内部。
@@ -273,10 +265,11 @@ todo/工具循环 + FileHistoryProvider 跨进程历史）在 `backend/` 内开�
 pnpm backend
 
 # 2. 交互式接上
-VT_AGENT=rpc pnpm dev        # 或 TUI 里敲 /rpc
+pnpm dev -- --rpc         # 或 tui.toml 设 agent = "rpc"，或 TUI 里敲 /rpc
 
 # 3. 断言（协议级 + 无头端到端）
-cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 21 项
+pnpm config-test                                           # 配置 19 项
+cd backend && ../backend/.venv/Scripts/python test_rpc.py    # 24 项（含 config/get）
 cd backend && ../backend/.venv/Scripts/python test_switch.py # 6 项
 pnpm rpc                                                  # 6 项（TUI↔后端真实链路）
 ```
@@ -335,11 +328,11 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 
 三个开关：
 
-| 变量 | 作用 |
+| 开关 | 作用 |
 |---|---|
-| `VT_SESSION_DIR` | 换会话目录（测试必须用它指到临时目录，别污染仓库） |
-| `VT_CONTINUE=1` / `VT_SESSION=<id\|last>` | 启动时恢复会话（等价于 `--continue` / `--session`） |
-| `VT_NO_PERSIST=1` | 完全不写磁盘（逃生门；此时 `/new` 只清空转写） |
+| `tui.toml session_dir` | 换会话目录（空 = `<repo>/.verse-sessions`；测试用 `setSessionDir()` 指到临时目录） |
+| `pnpm dev -- --continue` / `--session <id\|last>` | 启动时恢复会话 |
+| `tui.toml persist = false` | 完全不写磁盘（此时 `/new` 只清空转写） |
 
 取舍（有意为之）：
 
@@ -350,19 +343,20 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 - **`/open` 在流式中直接拒绝**（提示先 Esc）：少一条「中断 + 落盘 + 切换」的竞态路径。
 
 > 隐私：会话文件是**明文**，里面是你和模型的对话内容。它已进 `.gitignore`，但别把不该落盘的
-> 东西粘进对话；要彻底关掉就 `VT_NO_PERSIST=1`。
+> 东西粘进对话；要彻底关掉就 `tui.toml persist = false`。
 
 ## 验证（实测）
 
-无头套件退出码即结论；命令行不需要带任何 `VT_*` 变量（配置全从 `.env` 来；`rpc` 需要 `pnpm backend` 在跑，其余离线）。
-**它们都不会往仓库的 `.verse-sessions/` 写东西**：`smoke` / `sessions` 用临时目录，`rpc` / `complete` 直接 `VT_NO_PERSIST=1`：
+无头套件退出码即结论；命令行不需要带任何配置（前端开机自动向 gateway 取 `config/get`，离线用内置默认；`rpc` 需要 `pnpm backend` 在跑，其余离线）。
+**它们都不会往仓库的 `.verse-sessions/` 写东西**：`smoke` / `sessions` 用临时目录（`setSessionDir`），`rpc` / `complete` / 各 probes 传 `persist: false`：
 
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|
-| `pnpm smoke` | mock 剧本的渲染链路 + `.env` 加载行为 | 20 + 9 = 29 |
+| `pnpm smoke` | mock 剧本的渲染链路 | 20 |
 | `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（需 `pnpm backend` 在跑） | 6 |
 | `pnpm complete` | slash 命令补全的按键注入链路（离线 mock） | 4 |
-| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换（`uv run python test_rpc.py`） | 21 |
+| `pnpm config-test` | TOML 配置：三文件深合并 / 脱敏 / 坏文件回退 | 19 |
+| `backend/test_rpc.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/`config/get`（`uv run python test_rpc.py`） | 24 |
 | `backend/test_switch.py` | 协议级：会话切换/隔离/重连恢复（`uv run python test_switch.py`） | 6 |
 | `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（临时目录） | 24 |
 
@@ -406,7 +400,7 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 
 - **transcript 行是「段落式」的**：同一行里 segments 之间写换行符**不会**断行，所以这里按物理行拆 row，而不是「一条消息一个 row」。一开始按消息拆行时整段 markdown 挤成一坨。
 - **`TInputBox` 的 `placeholder` 没接线**：types 里有、1.1.9 的实现里没渲染，所以输入提示放进了框线标题。
-- **`TInputBox` 提交后不会自己清空**：把 `modelValue` 置空不生效（组件内部持有文本，也没 expose `clear()`），做法是提交后自增 `key` 强制重建输入框。这个坑是往 PTY 里连发两次 `/env` 才暴露的 —— 第二次提交的文本实际是 `/env/env`，掉进了「未知命令」分支。顺带加了控制字符清洗和 `VT_DEBUG_INPUT=1`（把**原始提交文本按 JSON** 记进 `.artifacts/input-debug.log`）。
+- **`TInputBox` 提交后不会自己清空**：把 `modelValue` 置空不生效（组件内部持有文本，也没 expose `clear()`），做法是提交后自增 `key` 强制重建输入框。这个坑是往 PTY 里连发两次 `/env` 才暴露的 —— 第二次提交的文本实际是 `/env/env`，掉进了「未知命令」分支。顺带加了控制字符清洗和 `debug_input`（`tui.toml` 或 `--debug-input`，把**原始提交文本按 JSON** 记进 `.artifacts/input-debug.log`）。
 - **TBox 的内容必须做成 children**：欢迎块第一版把 logo/Tips 画成 TBox 的兄弟节点，结果整块内容被盒体自身的填充覆盖得只剩边框——TBox 的绘制发生在子树之后，兄弟节点必输。
 - **TInput 的占位符要 `placeholderWhenFocused`**：默认 false，autoFocus 的输入框（我们恒定聚焦）永远不显示 placeholder；设 true 才有 step 那种常驻提示。
 - **`/` 补全弹窗必须包在 `TRenderPlane plane="overlay"` 里**：弹窗是 prompt 插件画在 zIndex=1e4 独立栈上的；挂在 root 或 `'default'` 平面时，逐帧合并会吃掉内容行——实测框和最后一行在、前 6 行全空，flush 流里连 detail 都缺。挪进 `overlay` 平面后全部行稳定渲染（`pnpm complete` 4 项断言守着）。同一次实测还确认：`TInputBox` 不透传 `prompt*` props（types + 源码双验证），补全必须自己用 `TBox + TInput` 组合，`prompt*` 直接给 `TInput`。
@@ -426,7 +420,7 @@ pnpm rpc                                                  # 6 项（TUI↔后端
 ## 已知边界
 
 - **会话恢复依赖服务端**：rpc 路的 `agentState` 只存 `{sid}`，对话历史在 `backend/history/`；
-  后端换了历史目录（`AGENT_RPC_HISTORY`），旧会话就接不回模型上下文（转写仍可重放）。
+  后端换了历史目录（`config.toml` 的 `[gateway] history`），旧会话就接不回模型上下文（转写仍可重放）。
 - **多进程同时写同一个会话是 last-write-wins**：没有做文件锁。demo 场景够用，真要并发得先加锁。
 
 - mock 剧本会在正文末尾明说「本段文本来自本地剧本，不是真实模型输出」—— 演示不假装真模型。
