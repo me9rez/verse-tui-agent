@@ -13,7 +13,7 @@
  */
 import { appendFileSync } from 'node:fs'
 import { computed, defineComponent, h, onBeforeUnmount, reactive, ref, type PropType } from 'vue'
-import { TText, TView } from '@simon_he/vue-tui'
+import { TCommandPalette, TText, TView, type TCommandPaletteItem } from '@simon_he/vue-tui'
 import { TTranscriptView, TRenderPlane } from '@simon_he/vue-tui/agent'
 import { TBox, TInput, createPromptMentionPlugin, useTerminal } from '@simon_he/vue-tui/vue'
 import type { TerminalKeyboardEvent } from '@simon_he/vue-tui/runtime'
@@ -158,6 +158,49 @@ export const App = defineComponent({
         )
       } catch (err) {
         store.addNote(`切换模式失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    // ── /model 模型选择器 ────────────────────────────────────────────────
+    /** 选择器开关 + 受控高亮索引：TCommandPalette 的 selectedIndex 是受控 prop
+     *  （源码读 props.selectedIndex ?? inner，只传静态值会冻结 ↑↓），必须双向绑。 */
+    const modelPickerOpen = ref(false)
+    const modelSelIdx = ref(0)
+    /** 条目 = gateway config/get 下发的 [models] 别名（与文本路径 model/set 同一语义）。 */
+    const modelItems = computed<TCommandPaletteItem[]>(() => {
+      const cur = backendModel.value || effectiveConfig().default_model
+      return effectiveConfig().models.map((m) => ({
+        label: m.alias,
+        detail: `${m.display_name || m.model}${m.alias === cur ? '（当前）' : ''} · ${m.provider}/${m.model}`,
+        value: m.alias,
+        keywords: [m.model, m.provider],
+      }))
+    })
+    /** 打开选择器前把高亮预置到当前模型。 */
+    function currentModelIndex(): number {
+      const cur = backendModel.value || effectiveConfig().default_model
+      const i = modelItems.value.findIndex((m) => m.value === cur)
+      return i >= 0 ? i : 0
+    }
+    /** /model 切换的共用实现：选择器 Enter 与 /model <id> 文本路径走同一套守卫、调用与文案。 */
+    async function applyModelSwitch(id: string): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote('当前是 mock 剧本，没有模型可切；/rpc 切到后端后再用 /model <id>。')
+        return
+      }
+      if (ui.streaming) {
+        store.addNote('⚠ 本轮还在跑，等结束再切换模型。')
+        return
+      }
+      try {
+        const next = await sessionRef.value.setModel?.(id)
+        if (!next) store.addNote('后端不支持 model/set（需要更新 rpc_server.py）。')
+        else
+          store.addNote(
+            `模型已切换为 ${next}：服务端后续轮次生效；plan/todos 随 harness 重建重置，对话历史仍在磁盘。`,
+          )
+      } catch (err) {
+        store.addNote(`切换失败：${err instanceof Error ? err.message : String(err)}`)
       }
     }
 
@@ -381,22 +424,19 @@ export const App = defineComponent({
         } else if (cmd === '/model' || cmd.startsWith('/model ')) {
           const arg = raw.trim().slice(6).trim()
           if (!arg) {
-            store.addNote(`当前模型：${displayModel.value}${sessionRef.value.kind === 'rpc' ? '' : '（mock 剧本无模型）'}`)
-          } else if (sessionRef.value.kind !== 'rpc') {
-            store.addNote('当前是 mock 剧本，没有模型可切；/rpc 切到后端后再用 /model <id>。')
-          } else if (ui.streaming) {
-            store.addNote('⚠ 本轮还在跑，等结束再切换模型。')
-          } else {
-            try {
-              const next = await sessionRef.value.setModel?.(arg)
-              if (!next) store.addNote('后端不支持 model/set（需要更新 rpc_server.py）。')
-              else
-                store.addNote(
-                  `模型已切换为 ${next}：服务端后续轮次生效；plan/todos 随 harness 重建重置，对话历史仍在磁盘。`,
-                )
-            } catch (err) {
-              store.addNote(`切换失败：${err instanceof Error ? err.message : String(err)}`)
+            // 无参 = 弹模型选择器（rpc 且 [models] 非空才弹；否则回退提示）
+            if (sessionRef.value.kind !== 'rpc') {
+              store.addNote(`当前模型：${displayModel.value}（mock 剧本无模型）`)
+            } else if (ui.streaming) {
+              store.addNote('⚠ 本轮还在跑，等结束再切换模型。')
+            } else if (!modelItems.value.length) {
+              store.addNote(`当前模型：${displayModel.value}（config.toml [models] 为空，可用 /model <id> 直切）`)
+            } else {
+              modelSelIdx.value = currentModelIndex()
+              modelPickerOpen.value = true
             }
+          } else {
+            await applyModelSwitch(arg)
           }
         } else if (cmd === '/env') {
           // 配置展示的唯一来源：gateway 的 config/get（脱敏视图 + 实际读到的 toml）
@@ -712,6 +752,31 @@ export const App = defineComponent({
             promptTrigger: '/',
             promptMaxItems: 8,
             promptAlign: 'input',
+          }),
+          // /model 选择器：与输入行同挂 overlay plane（挂普通 plane 会被逐帧合并吃掉）。
+          // 内部是 TDialog placement:center，居中弹窗；内部输入自带 autoFocus 抢焦点。
+          h(TCommandPalette, {
+            modelValue: modelPickerOpen.value,
+            'onUpdate:modelValue': (v: boolean) => {
+              modelPickerOpen.value = v
+            },
+            title: '选择模型',
+            placeholder: '输入过滤…',
+            hint: '↑↓ 选择 · Enter 切换 · Esc 取消',
+            items: modelItems.value,
+            showRowDetails: true,
+            closeOnSelect: true,
+            resetQueryOnClose: true,
+            maxVisibleItems: 8,
+            w: Math.max(30, Math.min(72, cols - 8)),
+            h: Math.max(8, 7 + Math.min(modelItems.value.length, 8)),
+            selectedIndex: modelSelIdx.value,
+            'onUpdate:selectedIndex': (i: number) => {
+              modelSelIdx.value = i
+            },
+            onSelect: (p: { item: TCommandPaletteItem }) => {
+              void applyModelSwitch(String(p.item.value))
+            },
           }),
         ]),
       ])

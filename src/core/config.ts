@@ -46,20 +46,24 @@ export const BUILTIN_CONFIG: VerseBoot['config'] = {
 
 export const DEFAULT_RPC_URL = 'ws://127.0.0.1:8765'
 
-let boot: VerseBoot | null = null
+// 必须是响应式 ref：computed（如 modelItems）靠它失效重算。曾经是普通 let——
+// 模块级首帧渲染在 setBoot 之前求值过一次空数组后就永久缓存，/model 选择器
+// 会误判「[models] 为空」（2026-09-24 实测踩坑）。
+import { ref } from 'vue'
+const boot = ref<VerseBoot | null>(null)
 
 /** 开机 fetchBoot / rpc 握手 config/get 后调用；null = gateway 不可达（读 BUILTIN）。 */
 export function setBoot(b: VerseBoot | null): void {
-  boot = b
+  boot.value = b
 }
 
 export function getBoot(): VerseBoot | null {
-  return boot
+  return boot.value
 }
 
 /** /env 与启动逻辑读这份：boot 有值给真配置，没有给 BUILTIN。 */
 export function effectiveConfig(): VerseBoot['config'] {
-  return boot?.config ?? BUILTIN_CONFIG
+  return boot.value?.config ?? BUILTIN_CONFIG
 }
 
 /** 连一次 gateway 调 config/get 再断开；失败/超时返回 null（离线不报错）。 */
