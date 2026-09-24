@@ -17,6 +17,7 @@ export {
   saveSession,
   sessionDir,
   sessionPath,
+  setSessionDir,
 } from './store.ts'
 export { replaySession } from './replay.ts'
 export { createTurnRecorder, type TurnRecorder } from './recorder.ts'

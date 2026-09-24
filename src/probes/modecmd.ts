@@ -6,19 +6,17 @@ import { styles } from '../core/theme.ts'
 import { loadDotEnv } from '../core/env.ts'
 
 loadDotEnv()
-process.env.VT_NO_PERSIST = '1'
-process.env.VT_AGENT = 'rpc'
 
 const COLS = 100
 const ROWS = 44
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const holder: { api: AppApi | null } = { api: null }
 
 const app = createTerminalApp({
   cols: COLS,
   rows: ROWS,
   component: App,
-  props: { sessionKind: 'rpc', speed: 1, onReady: (n: AppApi) => { holder.api = n } },
+  props: { sessionKind: 'rpc', speed: 1, persist: false, onReady: (n: AppApi) => { holder.api = n } },
   defaultStyle: styles.text,
 })
 app.mount()

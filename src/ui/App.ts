@@ -75,6 +75,8 @@ export const App = defineComponent({
     autoPrompt: { type: String, default: '' },
     /** 启动时恢复哪个会话：具体 id，或 'last'（最近更新过的那个）；空 = 开新会话 */
     sessionId: { type: String, default: '' },
+    /** false 时完全不动磁盘（测试与 tui.toml persist=false 走这里） */
+    persist: { type: Boolean, default: true },
     onReady: { type: Function as PropType<(api: AppApi) => void>, default: undefined },
     onExit: { type: Function as PropType<() => void>, default: undefined },
   },
@@ -158,8 +160,8 @@ export const App = defineComponent({
     }
 
     // ── 持久会话 ──────────────────────────────────────────────────────────
-    /** VT_NO_PERSIST=1 时完全不动磁盘（逃生门） */
-    const persist = process.env.VT_NO_PERSIST !== '1'
+    /** props.persist=false 时完全不动磁盘（tui.toml persist=false / 测试注入） */
+    const persist = props.persist
     /** 当前会话的磁盘状态；用容器而不是 ref：它不是渲染数据，别引多余的响应式触发 */
     const current: { session: StoredSession | null } = { session: null }
 
@@ -302,7 +304,7 @@ export const App = defineComponent({
         if (cmd === '/sessions') {
           const all = listSessions()
           if (!all.length) {
-            store.addNote(persist ? '还没有落盘的会话。' : '落盘已关闭（VT_NO_PERSIST=1）。')
+            store.addNote(persist ? '还没有落盘的会话。' : '落盘已关闭（tui.toml persist=false）。')
           } else {
             const cur = current.session?.id
             const lines = all.map((one, i) => {
@@ -316,7 +318,7 @@ export const App = defineComponent({
           if (ui.streaming) {
             store.addNote('⚠ 正在跑一轮，先 Esc 中断再切换会话。')
           } else if (!persist) {
-            store.addNote('落盘已关闭（VT_NO_PERSIST=1）：没有可切换的会话。')
+            store.addNote('落盘已关闭（tui.toml persist=false）：没有可切换的会话。')
           } else {
             const arg = raw.trim().slice(5).trim()
             const all = listSessions()
@@ -330,7 +332,7 @@ export const App = defineComponent({
           }
         } else if (cmd === '/rename' || cmd.startsWith('/rename ')) {
           const wanted = raw.trim().slice(7).trim()
-          if (!current.session) store.addNote('落盘已关闭（VT_NO_PERSIST=1），无处可改。')
+          if (!current.session) store.addNote('落盘已关闭（tui.toml persist=false），无处可改。')
           else if (!wanted) store.addNote(`当前会话标题：${current.session.title}。用法 /rename <新标题>`)
           else {
             current.session.title = titleFromPrompt(wanted)
@@ -351,7 +353,7 @@ export const App = defineComponent({
         } else if (cmd === '/new' || cmd.startsWith('/new ')) {
           const wanted = raw.trim().slice(4).trim()
           if (!persist) {
-            store.addNote('落盘已关闭（VT_NO_PERSIST=1）：/new 只清空转写。')
+            store.addNote('落盘已关闭（tui.toml persist=false）：/new 只清空转写。')
             store.clear()
           } else {
             startSession(sessionRef.value.kind, wanted || '新会话')

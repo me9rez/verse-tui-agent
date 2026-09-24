@@ -10,7 +10,7 @@
  *   4. 第二次 Enter = 真提交（/fold 的「…全部分组」note 进入转写，输入框清空）
  *   5. Shift+Tab 快捷键：mock 下提示「没有 harness 模式」
  *
- * 与 smoke 一样 VT_NO_PERSIST=1：不往仓库 .verse-sessions/ 写测试会话。
+ * 与 smoke 一样传 persist: false：不往仓库 .verse-sessions/ 写测试会话。
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
@@ -20,7 +20,6 @@ import { rowsToHtml } from '../core/html.ts'
 import { loadDotEnv } from '../core/env.ts'
 
 loadDotEnv()
-process.env.VT_NO_PERSIST = '1'
 
 const COLS = 100
 const ROWS = 44
@@ -35,6 +34,7 @@ const app = createTerminalApp({
   props: {
     sessionKind: 'mock',
     speed: 0,
+    persist: false,
     onReady(next: AppApi) {
       holder.api = next
     },

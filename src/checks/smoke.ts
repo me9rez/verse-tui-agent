@@ -13,17 +13,13 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listSessions, loadSession } from '../session/persist/index.ts'
+import { listSessions, loadSession, setSessionDir } from '../session/persist/index.ts'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
-import { loadDotEnv } from '../core/env.ts'
-
-// .env / .env.local 先于业务逻辑加载（真实环境变量优先，文件不覆盖已存在的键）
-loadDotEnv()
 
 // 会话落盘断言会真的写文件，所以把会话目录指到临时目录——绝不往仓库的 .verse-sessions/ 里写测试数据。
-process.env.VT_SESSION_DIR = mkdtempSync(join(tmpdir(), 'verse-smoke-'))
+setSessionDir(mkdtempSync(join(tmpdir(), 'verse-smoke-')))
 
 
 const COLS = 100

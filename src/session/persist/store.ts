@@ -3,7 +3,7 @@
  *
  * 没有索引文件：列表直接扫目录、读每个文件（会话都很小），
  * 少一个需要维护同步的冗余结构，就少一类「索引与内容不一致」的 bug。
- * VT_SESSION_DIR 可覆盖目录——测试必须用临时目录，别污染仓库。
+ * setSessionDir 可覆盖目录——TUI 按 tui.toml 注入，测试必须指到临时目录别污染仓库。
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -12,8 +12,15 @@ import { asStoredSession, type StoredSession } from './model.ts'
 const DEFAULT_DIR = '.verse-sessions'
 const EXT = '.json'
 
+let dirOverride = ''
+
+/** 注入会话目录（TUI 启动按 tui 配置、测试指到临时目录；接替旧 VT_SESSION_DIR 环境变量）。 */
+export function setSessionDir(dir: string): void {
+  dirOverride = dir
+}
+
 export function sessionDir(): string {
-  return resolve(process.env.VT_SESSION_DIR ?? DEFAULT_DIR)
+  return resolve(dirOverride || DEFAULT_DIR)
 }
 
 export function sessionPath(id: string): string {

@@ -3,7 +3,7 @@
  *
  *   node src/checks/session-check.ts
  *
- * 用 VT_SESSION_DIR 把会话目录指到临时目录——绝不污染仓库自己的 .verse-sessions/。
+ * 用 setSessionDir 把会话目录指到临时目录——绝不污染仓库自己的 .verse-sessions/。
  */
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,6 +19,7 @@ import {
   newSessionId,
   replaySession,
   saveSession,
+  setSessionDir,
   titleFromPrompt,
   type StoredSession,
 } from '../session/persist/index.ts'
@@ -39,7 +40,7 @@ function section(title: string, fn: () => Promise<void> | void): void {
 // 独立的临时会话目录 + 造一个合法会话的工厂
 const NL = String.fromCharCode(10)
 const dir = mkdtempSync(join(tmpdir(), 'verse-sessions-'))
-process.env.VT_SESSION_DIR = dir
+setSessionDir(dir)
 
 function makeSession(id: string, over: Partial<StoredSession> = {}): StoredSession {
   const now = new Date().toISOString()
