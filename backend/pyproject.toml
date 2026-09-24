@@ -10,3 +10,12 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]     # 非包项目：让 tests 里能 import config / rpc_server / rpc_helpers
