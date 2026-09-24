@@ -95,7 +95,7 @@ tui  agent=rpc speed=1 persist=true · session_dir=…
 | **输入 `/`** | **命令自动补全**：↑↓ 选择 · Enter/Tab 采用（再按 Enter 发送）· 模糊匹配、与 `/help` 同一张命令表 |
 | **Shift+Tab** | **切 harness 模式 plan ↔ execute**（仅 rpc；状态栏独立模式段显示当前值，plan 高亮；mock 提示不支持） |
 | 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model [<id>]`（无参弹模型选择器，带 id 直切） `/exit` |
-| 会话 | `/sessions` 列表（▶ = 当前）· `/open <序号\|id>` 切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
+| 会话 | `/sessions` 列表（▶ = 当前）· `/open [序号\|id]`（无参弹选择器）切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
 `/long` 会吐一段长回答，专门用来看长内容下的增量重绘与滚动保持。
 
