@@ -1,10 +1,9 @@
 {
-  "name": "verse-tui-agent",
-  "version": "1.0.0",
+  "name": "verse",
+  "version": "0.0.1",
   "private": true,
-  "description": "Verse · 用 @simon_he/vue-tui 搭的终端流式 agent demo（思考/工具块可折叠）",
+  "description": "Verse",
   "type": "module",
-  "packageManager": "pnpm@12.4.2",
   "scripts": {
     "dev": "node src/cli/terminal.ts",
     "smoke": "node src/checks/smoke.ts && node src/checks/env-check.ts",
@@ -18,14 +17,14 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@ai-sdk/openai-compatible": "^3.0.51",
-    "@simon_he/vue-tui": "^1.1.9",
-    "ai": "^7.0.105",
+    "@ai-sdk/openai-compatible": "^3.0.55",
+    "@simon_he/vue-tui": "^1.1.11",
+    "ai": "^7.0.113",
     "vue": "^3.5.43",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^26.6.1",
+    "@types/node": "^26.6.2",
     "typescript": "^7.0.2"
   },
   "pnpm": {
