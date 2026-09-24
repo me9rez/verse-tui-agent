@@ -1,4 +1,5 @@
-/* /model 命令端到端：真连后端，切换 → 显示跟随 → 查询 → 恢复原值。 */
+/* /model 命令端到端：真连后端，无参弹选择器 → 文本直切 → 信号跟随 → 恢复原值。
+ * 无参 /model 现在弹模型选择器（不再回显 note），查询断言改用 getBackendModel() 权威信号。 */
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { styles } from '../core/theme.ts'
@@ -38,8 +39,25 @@ async function submitAndWait(text: string, expect: string): Promise<void> {
   if (!found) process.exitCode = 1
 }
 
-await submitAndWait('/model', '当前模型：')
+// 1. 无参 /model → 弹出选择器 → Esc 关闭
+const screen = (): string => api.screenText().join('\n')
+api.submit('/model')
+await sleep(300)
+let ok = screen().includes('选择模型')
+console.log(ok ? '✔' : '✘', '[/model] 选择器弹出（标题「选择模型」上屏）')
+if (!ok) process.exitCode = 1
+app.events.dispatch({ type: 'keydown', key: 'Escape' })
+await sleep(200)
+ok = !screen().includes('选择模型')
+console.log(ok ? '✔' : '✘', '[Esc] 选择器关闭')
+if (!ok) process.exitCode = 1
+
+// 2. 文本直切 → 后端确认 note；3. 显示跟随改查权威信号
 await submitAndWait('/model probe-ui-model', '模型已切换为 probe-ui-model')
-await submitAndWait('/model', '当前模型：probe-ui-model')
+const followed = getBackendModel() === 'probe-ui-model'
+console.log(followed ? '✔' : '✘', '[查询] getBackendModel =', getBackendModel())
+if (!followed) process.exitCode = 1
+
+// 4. 恢复原值
 await submitAndWait(`/model ${orig}`, `模型已切换为 ${orig}`)
 process.exit(process.exitCode ?? 0)
