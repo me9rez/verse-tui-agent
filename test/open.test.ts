@@ -159,18 +159,16 @@ test('/open 选择器：空回退 / 弹出 / ▶ 标记 / ↑↓+Enter 切换 / 
   finalScreen = api.screenText()
 
   // ── 6. ArrowDown + Enter → 切到列表下一项（甲） ──
-  const beforeSwitch = switchNotes().length
+  //  注意：切换会 replaySession 重放转写（旧 note 一并被清），所以按目标 id 是否落地判断，
+  //  不比较「已切到」note 条数（1→清0→加1 仍是 1，比计数会误报）。
   key('ArrowDown')
   await sleep(80)
   key('Enter')
-  const switchedA = await waitFor(
-    () => switchNotes().length > beforeSwitch && switchNotes().some((l) => l.includes(A.id)),
-    5_000,
-  )
+  const switchedA = await waitFor(() => switchNotes().some((l) => l.includes(A.id)), 5_000)
   check(
     '↑↓ 移动 + Enter 切换会话',
     switchedA,
-    switchedA ? `已切到 ${A.id}（列表第 2 项）` : `5s 内没等到「已切到 ${A.id}」，note 数 ${switchNotes().length}`,
+    switchedA ? `已切到 ${A.id}（列表第 2 项，注意行的 › 已移到甲）` : `5s 内没等到「已切到 ${A.id}」，实际：${switchNotes().join(' / ')}`,
   )
   finalScreen = api.screenText()
 

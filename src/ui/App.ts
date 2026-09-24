@@ -179,8 +179,7 @@ export const App = defineComponent({
       }))
     })
     /** 选择器宽度自适应：最长一行（label + 2 格间隙 + detail）+ 6 格内边距，防右列截断。 */
-    function modelRowWidth(): number {
-      const list = modelItems.value
+    function pickerRowWidth(list: readonly TCommandPaletteItem[]): number {
       if (!list.length) return 30
       const widest = Math.max(
         ...list.map((it) => cellWidth(String(it.label)) + 2 + cellWidth(String(it.detail ?? ''))),
@@ -214,6 +213,13 @@ export const App = defineComponent({
         store.addNote(`切换失败：${err instanceof Error ? err.message : String(err)}`)
       }
     }
+
+    /** /open 会话选择器：开关 + 受控高亮 + 条目。
+     *  条目在打开瞬间构建存 ref（fs 读盘无响应式依赖——用 computed 会像 boot 那次
+     *  一样把首帧的死值缓存住），当前会话高亮同样在打开前预置。 */
+    const sessionPickerOpen = ref(false)
+    const sessionSelIdx = ref(0)
+    const sessionPickerItems = ref<TCommandPaletteItem[]>([])
 
     // ── 持久会话 ──────────────────────────────────────────────────────────
     /** props.persist=false 时完全不动磁盘（tui.toml persist=false / 测试注入） */
@@ -251,6 +257,22 @@ export const App = defineComponent({
       sessionRef.value.restore?.(target.turns.at(-1)?.agentState)
       turn.value = target.turns.length
       scheduler.invalidate()
+    }
+
+    /** 会话选择器条目：label=标题，detail=「▶(当前) kind · 轮数 · 时间」，value=id（/sessions 同款语义）。 */
+    function buildSessionItems(all: StoredSession[]): TCommandPaletteItem[] {
+      const cur = current.session?.id
+      return all.map((s) => ({
+        label: s.title || s.id,
+        detail: `${s.id === cur ? '▶ ' : ''}${s.kind} · ${s.turns.length} 轮 · ${formatStamp(s.updatedAt)}`,
+        value: s.id,
+        keywords: [s.id, s.kind],
+      }))
+    }
+    /** 切换 + 统一文案：选择器 Enter 与 /open <序号|id> 文本路径共用。 */
+    function switchToSession(target: StoredSession): void {
+      openSession(target)
+      store.addNote(`已切到 ${target.id} · ${target.title}（${target.turns.length} 轮）`)
     }
 
     if (persist) {
@@ -374,13 +396,26 @@ export const App = defineComponent({
             store.addNote('落盘已关闭（tui.toml persist=false）：没有可切换的会话。')
           } else {
             const arg = raw.trim().slice(5).trim()
-            const all = listSessions()
-            const target = /^\d+$/.test(arg) ? all[Number(arg) - 1] : (all.find((one) => one.id === arg) ?? loadSession(arg))
-            if (!target) {
-              store.addNote(`没找到会话「${arg}」。用 /sessions 看列表。`)
+            if (!arg) {
+              // 无参 = 弹会话选择器（空列表回退提示）
+              const all = listSessions()
+              if (!all.length) {
+                store.addNote('还没有落盘的会话：/new 新建一个，落盘后即可用选择器切换。')
+              } else {
+                sessionPickerItems.value = buildSessionItems(all)
+                const ci = all.findIndex((s) => s.id === current.session?.id)
+                sessionSelIdx.value = ci >= 0 ? ci : 0
+                modelPickerOpen.value = false // 两个选择器互斥，别叠开
+                sessionPickerOpen.value = true
+              }
             } else {
-              openSession(target)
-              store.addNote(`已切到 ${target.id} · ${target.title}（${target.turns.length} 轮）`)
+              const all = listSessions()
+              const target = /^\d+$/.test(arg) ? all[Number(arg) - 1] : (all.find((one) => one.id === arg) ?? loadSession(arg))
+              if (!target) {
+                store.addNote(`没找到会话「${arg}」。用 /sessions 看列表。`)
+              } else {
+                switchToSession(target)
+              }
             }
           }
         } else if (cmd === '/rename' || cmd.startsWith('/rename ')) {
@@ -444,6 +479,7 @@ export const App = defineComponent({
               store.addNote(`当前模型：${displayModel.value}（config.toml [models] 为空，可用 /model <id> 直切）`)
             } else {
               modelSelIdx.value = currentModelIndex()
+              sessionPickerOpen.value = false // 两个选择器互斥，别叠开
               modelPickerOpen.value = true
             }
           } else {
@@ -779,7 +815,7 @@ export const App = defineComponent({
             closeOnSelect: true,
             resetQueryOnClose: true,
             maxVisibleItems: 8,
-            w: Math.max(30, Math.min(cols - 4, modelRowWidth())),
+            w: Math.max(30, Math.min(cols - 4, pickerRowWidth(modelItems.value))),
             h: Math.max(8, 7 + Math.min(modelItems.value.length, 8)),
             selectedIndex: modelSelIdx.value,
             'onUpdate:selectedIndex': (i: number) => {
@@ -787,6 +823,34 @@ export const App = defineComponent({
             },
             onSelect: (p: { item: TCommandPaletteItem }) => {
               void applyModelSwitch(String(p.item.value))
+            },
+          }),
+          // /open 会话选择器：与 /model 同机制（条目在打开瞬间构建，见 sessionPickerItems 注释）
+          h(TCommandPalette, {
+            modelValue: sessionPickerOpen.value,
+            'onUpdate:modelValue': (v: boolean) => {
+              sessionPickerOpen.value = v
+            },
+            title: '切换会话',
+            placeholder: '输入过滤…',
+            hint: '↑↓ 选择 · Enter 切换 · Esc 取消',
+            items: sessionPickerItems.value,
+            showRowDetails: true,
+            closeOnSelect: true,
+            resetQueryOnClose: true,
+            maxVisibleItems: 10,
+            w: Math.max(30, Math.min(cols - 4, pickerRowWidth(sessionPickerItems.value))),
+            h: Math.max(8, 7 + Math.min(sessionPickerItems.value.length, 10)),
+            selectedIndex: sessionSelIdx.value,
+            'onUpdate:selectedIndex': (i: number) => {
+              sessionSelIdx.value = i
+            },
+            onSelect: (p: { item: TCommandPaletteItem }) => {
+              // 打开与选择之间会话可能被删：重读盘兜底
+              const id = String(p.item.value)
+              const target = listSessions().find((s) => s.id === id) ?? loadSession(id)
+              if (target) switchToSession(target)
+              else store.addNote(`会话「${id}」已不存在（可能被删了）。`)
             },
           }),
         ]),

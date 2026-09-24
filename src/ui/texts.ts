@@ -23,7 +23,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { cmd: '/rpc', desc: '切到唯一 agent 后端（WebSocket JSON-RPC，需先 pnpm backend 起服务）' },
   { cmd: '/env', desc: '看当前后端配置（不回显密钥）' },
   { cmd: '/sessions', desc: '列出落盘的会话（▶ = 当前）' },
-  { cmd: '/open', usage: '<序号|id>', desc: '切换会话（恢复转写与模型上下文）' },
+  { cmd: '/open', usage: '[序号|id]', desc: '切换会话（恢复转写与模型上下文），无参弹选择器' },
   { cmd: '/new', usage: '[标题]', desc: '新建一个空会话' },
   { cmd: '/rename', usage: '<标题>', desc: '给当前会话改名' },
   { cmd: '/delete', usage: '<序号|id>', desc: '删除某个会话（不能删当前）' },
