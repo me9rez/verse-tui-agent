@@ -24,12 +24,15 @@ api_key = ""                         # 明文写这里；config/get 只回 "***s
 [models."wb2api/cn:hy3"]
 provider = "wb2api"
 model = "cn:hy3"
-max_context_size = 131072            # 上下文窗口（token）；配置即启用 harness 历史压缩（超预算先折叠工具输出再截断）
+max_context_size = 200000           # 上下文窗口（token）；配置即启用 harness 历史压缩（超预算先折叠工具输出再截断）
 display_name = "cn:hy3"              # /model 选择器显示名，缺省回退 model
+support_efforts = ["low", "high"] 
+capabilities = ["thinking", "image_in"]
 # 以下全部可选（Kimi Code 同款语义，不配 = 行为不变）：
 # max_input_size = 96000             # 单次请求输入上限；压缩预算优先用它（≤ 窗口 - 输出）
 # max_output_size = 16384            # 输出预留（映射 max_tokens）；缺省 16384
 # capabilities = ["thinking", "image_in"]   # 能力标签（追加式）：thinking/always_thinking/image_in/video_in/audio_in/tool_use…
+#                                           # image_in = 解锁 TUI 的 Alt+V 剪贴板贴图（多模态输入开关）
 # support_efforts = ["low", "medium", "high", "xhigh"]  # /effort 可选档位；不配回默认 low/medium/high/xhigh
 # default_effort = "high"            # 启动/切模型后的默认档位；不配则不发思考参数
 # off_effort = "none"                # /effort off 时下发端点的编码（如 xai 的 "none"）；缺省发 "none"

@@ -18,14 +18,18 @@ import { TTranscriptView, TRenderPlane } from '@simon_he/vue-tui/agent'
 import { TBox, TInput, createPromptMentionPlugin, useTerminal } from '@simon_he/vue-tui/vue'
 import type { TerminalKeyboardEvent } from '@simon_he/vue-tui/runtime'
 import { layoutOf } from './layout.ts'
-import { COMMANDS, EMPTY_NOTE, HELP, NL, PLACEHOLDER, stripControlChars } from './texts.ts'
+import { readClipboardImage } from './clipboard.ts'
+import {
+  COMMANDS, EMPTY_NOTE, HELP, IMAGE_HINT, IMAGE_NOTE_EMPTY, IMAGE_NOTE_MOCK, IMAGE_NOTE_UNSUPPORTED,
+  NL, PLACEHOLDER, imageChip, imageNoteReady, stripControlChars,
+} from './texts.ts'
 import { createTurnSink, type Phase } from '../session/sink.ts'
 import { createTranscriptStore, type TranscriptStore } from '../transcript/index.ts'
 import { createMockSession } from '../session/mock.ts'
 import { createRpcSession } from '../session/rpc.ts'
 import { getBackendModel, onBackendModel } from '../session/model.ts'
 import { onBackendMode } from '../session/mode.ts'
-import type { AgentSession } from '../session/seam.ts'
+import type { AgentSession, RawImage } from '../session/seam.ts'
 import { DEFAULT_RPC_URL, effectiveConfig, getBoot } from '../core/config.ts'
 import { styles } from '../core/theme.ts'
 import { APP_ART, APP_VERSION } from '../core/brand.ts'
@@ -270,6 +274,38 @@ export const App = defineComponent({
       }
     }
 
+    // ── Alt+V 贴图（多模态输入，capabilities.image_in 门控）──────────────
+    /** 待发送图片：非空时输入行右端显示指示条，随下一条消息发出后清空。 */
+    const pendingImage = ref<{ data: string; bytes: number } | null>(null)
+    /** 当前模型是否声明 image_in：capabilities 是显式追加式标签，未配置 = 不支持（保守）。 */
+    const imageSupported = computed<boolean>(() => {
+      const alias = backendModel.value || effectiveConfig().default_model
+      const m = effectiveConfig().models.find((one) => one.alias === alias)
+      return !!m?.capabilities?.includes('image_in')
+    })
+    const imageChipText = computed(() =>
+      pendingImage.value ? imageChip(Math.max(1, Math.round(pendingImage.value.bytes / 1024))) : '',
+    )
+    const placeholderText = computed(() => (imageSupported.value ? PLACEHOLDER + IMAGE_HINT : PLACEHOLDER))
+    /** Alt+V：读剪贴板图片 → pendingImage（重复按覆盖）。不支持时给守卫提示。 */
+    async function pasteImageFromClipboard(): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote(IMAGE_NOTE_MOCK)
+        return
+      }
+      if (!imageSupported.value) {
+        store.addNote(IMAGE_NOTE_UNSUPPORTED)
+        return
+      }
+      const img = await readClipboardImage()
+      if (!img) {
+        store.addNote(IMAGE_NOTE_EMPTY)
+        return
+      }
+      pendingImage.value = { data: img.data, bytes: img.bytes }
+      store.addNote(imageNoteReady(Math.max(1, Math.round(img.bytes / 1024))))
+    }
+
     /** /open 会话选择器：开关 + 受控高亮 + 条目。
      *  条目在打开瞬间构建存 ref（fs 读盘无响应式依赖——用 computed 会像 boot 那次
      *  一样把首帧的死值缓存住），当前会话高亮同样在打开前预置。 */
@@ -364,7 +400,7 @@ export const App = defineComponent({
     const sleep = (ms: number) => (ms <= 0 ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, ms)))
 
     /** 一轮对话：会话产出增量 → 写进 store → 视图按 version 增量重绘。 */
-    async function runTurn(prompt: string): Promise<void> {
+    async function runTurn(prompt: string, images?: RawImage[]): Promise<void> {
       if (ui.streaming) return
       store.addUser(prompt)
       turn.value += 1
@@ -405,7 +441,7 @@ export const App = defineComponent({
           chunkDelayMs,
           turn: turn.value,
           sleep,
-        })
+        }, images)
       } finally {
         finish(ui.aborted, sessionRef.value.snapshot?.())
         ui.streaming = false
@@ -567,16 +603,21 @@ export const App = defineComponent({
             `tui  agent=${c.tui.agent} speed=${c.tui.speed} persist=${c.tui.persist}${c.tui.session_dir ? ` · session_dir=${c.tui.session_dir}` : ''}`,
             `配置文件  ${b ? (b.sources.length ? b.sources.join(' + ') : '无（全部默认值）') : '(未取到)'}`,
           ]) store.addNote(line)
-        } else if (cmd === '/long') {
-          void runTurn('/long')
-          return
-        } else {
-          store.addNote(`未知命令：${cmd}（试试 /help）`)
-        }
+      } else if (cmd === '/long') {
+        void runTurn('/long')
+        return
+      } else {
+        store.addNote(`未知命令：${cmd}（试试 /help）`)
+      }
         scheduler.invalidate()
         return
       }
-      void runTurn(text)
+      // 待发图片只跟普通消息走：`/` 命令不携带；消息发出即清空指示条
+      const images: RawImage[] | undefined = pendingImage.value
+        ? [{ media_type: 'image/png', data: pendingImage.value.data }]
+        : undefined
+      pendingImage.value = null
+      void runTurn(text, images)
     }
 
     /** 点击/回车落在某一行：是分组头部就折叠切换 */
@@ -590,6 +631,13 @@ export const App = defineComponent({
     }
 
     function onKey(event: TerminalKeyboardEvent): void {
+      // Alt+V 贴图：挂在根节点 onKeydownCapture（捕获阶段，先于 TInput），
+      // 组合键不会被输入框当作可打印字符消费
+      if (event.altKey && (event.key === 'v' || event.key === 'V')) {
+        event.preventDefault()
+        void pasteImageFromClipboard()
+        return
+      }
       if (event.key === 'Escape' && ui.streaming) {
         event.preventDefault()
         ui.aborted = true
@@ -849,7 +897,8 @@ export const App = defineComponent({
             key: composerKey.value,
             x: 3,
             y: l.inputY,
-            w: Math.max(4, cols - 4),
+            // 有待发图片时输入框收窄，右端让位给指示条（divider 紧贴输入行上方，没有第二行可用）
+            w: Math.max(4, cols - 4 - (imageChipText.value ? cellWidth(imageChipText.value) + 2 : 0)),
             h: 1,
             modelValue: input.value,
             'onUpdate:modelValue': (v: string) => {
@@ -860,7 +909,7 @@ export const App = defineComponent({
               composerKey.value += 1
               void handleSubmit(String(v ?? ''))
             },
-            placeholder: PLACEHOLDER,
+            placeholder: placeholderText.value,
             placeholderWhenFocused: true,
             style: styles.text,
             autoFocus: true,
@@ -870,6 +919,19 @@ export const App = defineComponent({
             promptMaxItems: 8,
             promptAlign: 'input',
           }),
+          // 待发图片指示条：与输入行同行右端（Alt+V 置入，发送后消失）
+          ...(imageChipText.value
+            ? [
+                h(TText, {
+                  x: Math.max(6, cols - 2 - cellWidth(imageChipText.value)),
+                  y: l.inputY,
+                  w: cols,
+                  h: 1,
+                  value: imageChipText.value,
+                  style: styles.tipCmd,
+                }),
+              ]
+            : []),
           // /model 选择器：与输入行同挂 overlay plane（挂普通 plane 会被逐帧合并吃掉）。
           // 内部是 TDialog placement:center，居中弹窗；内部输入自带 autoFocus 抢焦点。
           h(TCommandPalette, {

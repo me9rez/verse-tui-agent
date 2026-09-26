@@ -76,6 +76,29 @@ def test_thinking档位读写校验与持久(live_server):
     _run(inner())
 
 
+def test_images多模态校验(live_server):
+    async def inner():
+        async with websockets.connect(RPC_URL) as ws:
+            rpc = Rpc(ws)
+            sid = new_sid("img")
+            png1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            r = await rpc.call("agent/chat", {"session": sid, "prompt": "看图", "images": "no"}, timeout=10)
+            assert r.get("error", {}).get("code") == -32602, f"images 非 list → -32602 — {r.get('error')}"
+            r = await rpc.call("agent/chat", {"session": sid, "prompt": "看图",
+                                              "images": [{"media_type": "text/plain", "data": png1x1}]}, timeout=10)
+            assert r.get("error", {}).get("code") == -32602, f"media_type 非 image/* → -32602 — {r.get('error')}"
+            r = await rpc.call("agent/chat", {"session": sid, "prompt": "看图",
+                                              "images": [{"media_type": "image/png", "data": "!!!bad!!!"}]}, timeout=10)
+            assert r.get("error", {}).get("code") == -32602, f"非法 base64 → -32602 — {r.get('error')}"
+            r = await rpc.call("agent/chat", {"session": sid, "prompt": "看图",
+                                              "images": [{"media_type": "image/png", "data": png1x1}] * 5}, timeout=10)
+            assert r.get("error", {}).get("code") == -32602, f"超过 4 张 → -32602 — {r.get('error')}"
+            r = await rpc.call("agent/chat", {"session": sid, "prompt": "看图",
+                                              "images": [{"media_type": "image/png", "data": ""}]}, timeout=10)
+            assert r.get("error", {}).get("code") == -32602, f"空 data → -32602 — {r.get('error')}"
+    _run(inner())
+
+
 def test_错误路径(live_server):
     async def inner():
         async with websockets.connect(RPC_URL) as ws:

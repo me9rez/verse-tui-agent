@@ -58,13 +58,16 @@ export type ThinkingInfo = {
 
 import type { SessionKind } from './persist/model.ts'
 
+/** 待发送的图片附件（Alt+V 剪贴板贴图）：data 是 base64（不含 data: 前缀）。 */
+export type RawImage = { media_type: string; data: string }
+
 export type AgentSession = {
   readonly id: string
   readonly label: string
   /** 这条会话属于哪一路：决定落盘文件里的 kind，也决定 /new 切回哪一路 */
   readonly kind: SessionKind
-  /** 跑完一轮：把增量推给 sink。 */
-  respond(prompt: string, ctx: TurnContext): Promise<void>
+  /** 跑完一轮：把增量推给 sink。images 非空 = 多模态输入（mock 忽略，rpc 走 agent/chat params.images）。 */
+  respond(prompt: string, ctx: TurnContext, images?: RawImage[]): Promise<void>
   /** 切换后端模型（/model <id>）：返回后端确认的 model id；不支持的后端（mock）不实现 */
   setModel?(id: string): Promise<string>
   /** 读思考档位与当前模型的支持表（/effort 选择器数据源）；不支持的后端（mock）不实现 */

@@ -17,7 +17,7 @@
  * 会话历史在服务端 FileHistoryProvider（每 session 一个 JSONL）；
  * snapshot() 只存服务端 session id，恢复时拿它接回同一份磁盘历史。
  */
-import type { AgentSession, ThinkingInfo, ToolStep, TurnContext } from './seam.ts'
+import type { AgentSession, RawImage, ThinkingInfo, ToolStep, TurnContext } from './seam.ts'
 import { setBackendModel } from './model.ts'
 import { setBackendMode } from './mode.ts'
 import { DEFAULT_RPC_URL, setBoot, type VerseBoot } from '../core/config.ts'
@@ -224,7 +224,7 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
       }
     },
 
-    async respond(prompt: string, ctx: TurnContext): Promise<void> {
+    async respond(prompt: string, ctx: TurnContext, images?: RawImage[]): Promise<void> {
       sink = ctx.sink
       steps = new Map()
       let sock: WebSocket
@@ -240,7 +240,10 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
       const done = new Promise<unknown>((resolve, reject) => {
         pending.set(id, { resolve, reject })
       })
-      sock.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'agent/chat', params: { session: serverSid, prompt } }))
+      // images 非空 = 多模态输入（后端按 capabilities.image_in 门控，不支持回 -32602）
+      const params: Record<string, unknown> = { session: serverSid, prompt }
+      if (images?.length) params.images = images
+      sock.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'agent/chat', params }))
 
       // Esc → agent/cancel（服务端把该轮以 -32001 收尾，respond 正常返回）
       let cancelSent = false

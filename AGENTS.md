@@ -39,6 +39,7 @@ Verse —— 用 Vue 3 + `@simon_he/vue-tui` 搭的**终端流式 agent TUI**，
 | `pnpm model` | vitest：`/model` 选择器（**打真模型**） | **是** | 否 |
 | `pnpm open` | vitest：`/open` 会话选择器（离线 mock + 临时会话目录） | 否 | 否 |
 | `pnpm effort` | vitest：`/effort` 思考强度命令（离线 mock） | 否 | 否 |
+| `pnpm image` | vitest：Alt+V 剪贴板贴图（离线 mock + 能力门控） | 否 | 否 |
 | `pnpm test:backend` | pytest 全量（protocol + agent + switch，agent/switch 打真模型） | 自拉或复用 8765 | 否 |
 | `pnpm test` | vitest 全量（含 rpc / model，**必须先起后端**） | **是** | 否 |
 | `pnpm shot` | 把跑完的 buffer 渲成带色 HTML 出图 | 否 | 否 |
@@ -142,4 +143,7 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 - 该仓库运行在 Windows 上（git-bash 执行）：**改文件用编辑器/patch 工具**，不要用 shell 重定向或
   PowerShell `Set-Content` / `WriteAllLines` 重写文件（会改编码与换行符，git 看到整个文件被重写）。
 - 会话文件是**明文**（`.verse-sessions/`、`backend/history/` 均已 gitignore）；别把不该落盘的东西粘进对话。
+  Alt+V 贴的图片以 data URI 随会话 JSONL 落盘并在后续轮次重发——多图长对话会显著膨胀 token。
+- Windows 剪贴板读图走 PowerShell `Get-Clipboard -Format Image`（`src/ui/clipboard.ts`）：约定无图输出
+  `NO-IMAGE`；子进程必须 `windowsHide + maxBuffer 上限 + timeout`（同上条杀进程纪律）。
 - `tsc` 的报错就是门禁（当前 0 错）；`docs/architecture.md` §10 里那条「probes/complete.ts 有遗留报错」的记录已过时。

@@ -49,9 +49,10 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm rpc` | vitest：WebSocket JSON-RPC 后端 8 项（需先起 `pnpm backend`） |
 | `pnpm model` | vitest：`/model` 模型选择器 5 项（弹出/↑↓切换/Esc 取消/文本直切/mock 守卫，需后端） |
 | `pnpm effort` | vitest：`/effort` 思考强度 5 项软断言（补全/mock 守卫/选择器回退/HELP 派生，离线） |
+| `pnpm image` | vitest：Alt+V 贴图 4 项软断言（mock 守卫/能力门控/指示条，离线） |
 | `pnpm sessions` | vitest：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
 | `pnpm config-test` | pytest：后端 TOML 配置 11 函数 35 断言（深合并/overrides/新模型字段/脱敏/坏文件回退，离线） |
-| `pnpm test:backend` | pytest 全量：23 函数 73 断言（protocol 十秒内；agent/switch 打真模型） |
+| `pnpm test:backend` | pytest 全量：25 函数 79 断言（protocol 十秒内；agent/switch 打真模型） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm build` | tsdown 编译 `src/cli` 两个入口到 `dist/`（`bin`: `verse` → `dist/terminal.mjs`，带 shebang 可直接执行） |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
@@ -94,6 +95,7 @@ tui  agent=rpc speed=1 persist=true · session_dir=…
 | 操作 | 说明 |
 |---|---|
 | `Enter` | 发送当前输入 |
+| **`Alt+V`** | **粘贴剪贴板图片**（当前模型 `capabilities` 需声明 `image_in`；待发图片显示在输入行右端，随下一条消息发出，重复按覆盖） |
 | `Esc` | 中断正在跑的这一轮（转写里写入「已中断」） |
 | `Ctrl+End` | 视口跳回底部 |
 | **`Ctrl+T`** | **折叠 / 展开最近一组**（思考或工具） |
@@ -276,7 +278,7 @@ pnpm dev -- --rpc         # 或 tui.toml 设 agent = "rpc"，或 TUI 里敲 /rpc
 
 # 3. 断言（协议级 + 无头端到端）
 pnpm config-test        # pytest：配置 11 函数 35 断言
-pnpm test:backend       # pytest 全量 23 函数 73 断言（或 uv run pytest tests/test_rpc_protocol.py -q 只跑协议）
+pnpm test:backend       # pytest 全量 25 函数 79 断言（或 uv run pytest tests/test_rpc_protocol.py -q 只跑协议）
 pnpm rpc                # vitest：TUI↔后端真实链路 8 项
 pnpm model              # vitest：/model 选择器 5 项
 pnpm effort             # vitest：/effort 思考强度 5 项（离线）
@@ -286,6 +288,8 @@ pnpm effort             # vitest：/effort 思考强度 5 项（离线）
 
 ```
 请求   {"jsonrpc":"2.0","id":1,"method":"agent/chat","params":{"session":"vt-xxx","prompt":"…"}}
+       可选 params.images = [{"media_type":"image/png","data":"<base64>"}]（≤4 张/单图 12MB；
+       模型 capabilities 需声明 image_in，否则 -32602）
 事件   {"jsonrpc":"2.0","method":"agent/event","params":{"event":{"type":"answer_delta","text":"…"}}}
        type: thinking_delta / thinking_end / tool_start / tool_line / tool_end / answer_delta
 终态   {"jsonrpc":"2.0","id":1,"result":{"text":"…","usage":{…}}}    或 error
@@ -310,6 +314,7 @@ pnpm effort             # vitest：/effort 思考强度 5 项（离线）
 
 一轮跑完（含 Esc 中断）就把这一轮落盘；`/open` 切回来时会**用同一套 store API 重放**转写
 （实时看到的排版与重开看到的排版是同一条代码路径），并把模型上下文一起恢复。
+Alt+V 贴的图片经历史 provider 以 data URI 随会话 JSONL 明文落盘、并在后续轮次重发——别贴敏感截图。
 
 ```bash
 .verse-sessions/20260918-172237-uw3c.json   # 一会话一文件，默认在仓库根目录（已 gitignore）
@@ -365,7 +370,7 @@ pnpm effort             # vitest：/effort 思考强度 5 项（离线）
 | `pnpm complete` | slash 命令补全的按键注入链路（vitest，离线 mock） | 5 |
 | `pnpm effort` | `/effort` 思考强度：补全 / mock 守卫 / 选择器回退 / HELP 派生（vitest，离线 mock） | 5 |
 | `pnpm config-test` | TOML 配置：三文件深合并 / overrides / Kimi 同款模型字段 / 脱敏 / 坏文件回退（pytest） | 35 |
-| `backend/tests/test_rpc_*.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/thinking 档位/`config/get`（pytest，拆 protocol 25 + agent 7） | 32 |
+| `backend/tests/test_rpc_*.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/thinking 档位/images 校验/`config/get`（pytest，拆 protocol 31 + agent 7） | 38 |
 | `backend/tests/test_switch.py` | 协议级：会话切换/隔离/重连恢复（pytest） | 6 |
 | `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（vitest，临时目录） | 24 |
 

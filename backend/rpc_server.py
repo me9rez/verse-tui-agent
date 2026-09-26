@@ -14,6 +14,9 @@ JSON-RPC 2.0 over WebSocket 协议
 客户端 → 服务端（请求，带 id）：
   {"jsonrpc":"2.0","id":1,"method":"agent/chat",
    "params":{"session":"<sid>","prompt":"<用户输入>"}}
+      可选 params.images = [{"media_type":"image/png","data":"<base64>"}]：
+      多模态输入（≤4 张、单图 base64 ≤12MB）；当前模型 capabilities 需声明 image_in，
+      否则 -32602。图片经 Content.from_data 与文本合成一条 user Message 进 harness。
   {"jsonrpc":"2.0","id":9,"method":"agent/cancel","params":{"session":"<sid>"}}
       → 应答 {"result":{"cancelled":true|false}}；被取消那轮的 chat 请求另收 -32001 终态
   {"jsonrpc":"2.0","id":2,"method":"agent/reset","params":{"session":"<sid>"}}
@@ -81,6 +84,7 @@ JSON-RPC 2.0 over WebSocket 协议
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -91,7 +95,9 @@ from typing import Any, cast
 
 import websockets
 from agent_framework import (
+    Content,
     FileHistoryProvider,
+    Message,
     create_harness_agent,
     get_agent_mode,
     set_agent_mode,
@@ -281,6 +287,48 @@ def _effort_run_options() -> dict[str, Any] | None:
     return {"reasoning_effort": effort}
 
 
+# ── 多模态输入（agent/chat params.images，Kimi capabilities.image_in 门控）────
+MAX_IMAGE_B64_BYTES = 12 * 1024 * 1024   # base64 编码后的单图上限（≈9MB 原始 PNG）
+MAX_IMAGES_PER_TURN = 4
+
+
+def _images_error(images: Any) -> str | None:
+    """params.images 校验：合法返回 None，否则回中文错误消息（→ -32602）。"""
+    if not isinstance(images, list):
+        return "params.images 必须是数组"
+    if len(images) > MAX_IMAGES_PER_TURN:
+        return f"images 最多 {MAX_IMAGES_PER_TURN} 张"
+    for i, img in enumerate(images):
+        if not isinstance(img, dict):
+            return f"images[{i}] 必须是对象"
+        mt = str(img.get("media_type") or "")
+        data = img.get("data")
+        if not mt.startswith("image/"):
+            return f"images[{i}].media_type 必须是 image/*（收到 {mt!r}）"
+        if not isinstance(data, str) or not data:
+            return f"images[{i}].data 必须是非空 base64 字符串"
+        if len(data) > MAX_IMAGE_B64_BYTES:
+            return f"images[{i}] 超过单图 12MB 上限"
+        try:
+            base64.b64decode(data, validate=True)
+        except (TypeError, ValueError):
+            return f"images[{i}].data 不是合法 base64"
+    return None
+
+
+def _model_accepts_images(model_ref: str) -> bool:
+    """capabilities 门控：模型在 [models] 里声明 image_in 才放行。
+
+    capabilities 未配置的模型保守视为不支持（Kimi 语义是显式追加式标签，
+    宁可拒绝也不把图片扔给可能不消费的端点）。
+    """
+    mdef = CFG["models"].get(model_ref) or {}
+    caps = mdef.get("capabilities")
+    if not isinstance(caps, list) or not caps:
+        return False
+    return "image_in" in [str(c) for c in caps]
+
+
 try:
     _ensure_agent()
     log.info(
@@ -329,7 +377,8 @@ def _get_session(sid: str):
     return sess
 
 
-async def _stream_turn(ws, session: str, prompt: str, send_lock) -> dict[str, Any]:
+async def _stream_turn(ws, session: str, prompt: str, send_lock,
+                       images: list[dict[str, str]] | None = None) -> dict[str, Any]:
     """跑一轮 harness，把每个 AgentResponseUpdate 转成事件。返回 result 对象。"""
     sess = _get_session(session)
     assert agent is not None, "agent 未装配（_ensure_agent 应先成功）"
@@ -345,7 +394,18 @@ async def _stream_turn(ws, session: str, prompt: str, send_lock) -> dict[str, An
 
     # 思考档位按轮注入（thinking/set 改全局 EFFORT，下一轮生效；空 = 不发参数）
     run_opts = _effort_run_options()
-    async for chunk in agent.run(prompt, session=sess, stream=True, options=run_opts):
+    if images:
+        # 多模态：文本 + 图片内容项合成一条 user 消息（AgentRunInputs 接受 Message，
+        # Content.from_data 生成 data URI 内容项，编码交给端点）
+        contents: list[Any] = [Content.from_text(prompt)]
+        contents += [
+            Content.from_data(base64.b64decode(img["data"]), media_type=img["media_type"])
+            for img in images
+        ]
+        turn_input: Any = Message("user", contents)
+    else:
+        turn_input = prompt
+    async for chunk in agent.run(turn_input, session=sess, stream=True, options=run_opts):
         for c in chunk.contents:
             ctype = getattr(c, "type", "")
             if ctype == "text":
@@ -405,6 +465,15 @@ async def handle_chat(ws, rid, params, tasks, send_lock) -> None:
     if not isinstance(prompt, str) or not prompt.strip():
         await _send(ws, send_lock, _err(rid, -32602, "params.prompt 必须是非空字符串"))
         return
+    images = params.get("images")
+    if images is not None:
+        if err := _images_error(images):
+            await _send(ws, send_lock, _err(rid, -32602, err))
+            return
+        if not _model_accepts_images(MODEL):
+            await _send(ws, send_lock, _err(
+                rid, -32602, f"当前模型 {MODEL!r} 未声明 image_in 能力（[models.{MODEL}].capabilities）"))
+            return
     try:
         _ensure_agent()   # 参数校验之后才装配：坏参数仍回 -32602，配置缺失才 -32000
     except ConfigError as e:
@@ -414,7 +483,7 @@ async def handle_chat(ws, rid, params, tasks, send_lock) -> None:
     async def run():
         try:
             result = await asyncio.wait_for(
-                _stream_turn(ws, session, prompt, send_lock), timeout=MAX_RUN_SECONDS
+                _stream_turn(ws, session, prompt, send_lock, images), timeout=MAX_RUN_SECONDS
             )
             await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": result})
         except asyncio.CancelledError:
