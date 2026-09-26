@@ -79,17 +79,17 @@ test('Alt+M / Alt+E 路由与 usage 格式化', { timeout: 300_000 }, async () =
       .map((e) => (e.kind === 'line' ? e.text : (e as { title?: string }).title ?? ''))
       .join('\n')
 
-  // 1. mock 下 Alt+M → /model 无参守卫 note（openModelPicker 共用实现）
+  // 1. mock 下 Alt+M → 顺序直切被守卫拦截（cycleModel 的 mock 分支，与 /model 同文案）
   key('m', { altKey: true })
   const deadline1 = Date.now() + 3000
   while (Date.now() < deadline1 && !storeText().includes('mock 剧本无模型')) await sleep(30)
-  check('Alt+M 路由到模型选择器守卫', storeText().includes('mock 剧本无模型'), 'openModelPicker 的 mock 分支可见')
+  check('Alt+M 直切被 mock 守卫拦截', storeText().includes('mock 剧本无模型'), 'cycleModel 的 mock 分支可见')
 
-  // 2. mock 下 Alt+E → /effort 无参守卫 note（openEffortPicker 共用实现）
+  // 2. mock 下 Alt+E → 顺序直切被守卫拦截（cycleEffort 的 mock 分支，与 /effort 同文案）
   key('e', { altKey: true })
   const deadline2 = Date.now() + 3000
   while (Date.now() < deadline2 && !storeText().includes('mock 剧本，没有思考档位')) await sleep(30)
-  check('Alt+E 路由到思考强度选择器守卫', storeText().includes('mock 剧本，没有思考档位'), 'openEffortPicker 的 mock 分支可见')
+  check('Alt+E 直切被 mock 守卫拦截', storeText().includes('mock 剧本，没有思考档位'), 'cycleEffort 的 mock 分支可见')
 
   // 3. 无 alt 的 m/e 是普通字符：note 计数不变
   key('m')

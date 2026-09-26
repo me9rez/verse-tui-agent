@@ -327,7 +327,7 @@ export const App = defineComponent({
       store.addNote(imageSupported.value ? imageNoteReady(kb) : imageNoteDegraded(kb))
     }
 
-    /** 打开模型选择器：/model 无参与 Alt+M 共用（守卫同 applyModelSwitch 的前置检查）。 */
+    /** 打开模型选择器：/model 无参使用（Alt+M 是顺序直切，不弹窗）。 */
     async function openModelPicker(): Promise<void> {
       if (sessionRef.value.kind !== 'rpc') {
         store.addNote(`当前模型：${displayModel.value}（mock 剧本无模型）`)
@@ -340,6 +340,54 @@ export const App = defineComponent({
         sessionPickerOpen.value = false // 三个选择器互斥，别叠开
         effortPickerOpen.value = false
         modelPickerOpen.value = true
+      }
+    }
+
+    /** Alt+M：按 [models] 顺序循环直切下一个模型（不弹窗）。守卫与 applyModelSwitch 一致。 */
+    async function cycleModel(): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote(`当前模型：${displayModel.value}（mock 剧本无模型）`)
+        return
+      }
+      if (ui.streaming) {
+        store.addNote('⚠ 本轮还在跑，等结束再切换模型。')
+        return
+      }
+      const models = effectiveConfig().models
+      if (!models.length) {
+        store.addNote(`当前模型：${displayModel.value}（config.toml [models] 为空，可用 /model <id> 直切）`)
+        return
+      }
+      const cur = backendModel.value || effectiveConfig().default_model
+      const i = models.findIndex((m) => m.alias === cur)
+      const next = models[(i + 1 + models.length) % models.length]!
+      await applyModelSwitch(next.alias)
+    }
+
+    /** Alt+E：在当前模型的档位表内循环直切下一档（不弹窗）。
+     *  当前档位来自 thinking/get（每次取实时值，切模型后不会用过期状态）。 */
+    async function cycleEffort(): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote('当前是 mock 剧本，没有思考档位；/rpc 切到后端后再用 /effort <档位>。')
+        return
+      }
+      if (ui.streaming) {
+        store.addNote('⚠ 本轮还在跑，等结束再切换思考档位。')
+        return
+      }
+      try {
+        const info = await sessionRef.value.getThinking?.()
+        if (!info) {
+          store.addNote('后端不支持 thinking/get（需要更新 rpc_server.py）。')
+          return
+        }
+        backendEffort.value = info.effort
+        const levels = info.support_efforts.length ? info.support_efforts : ['low', 'medium', 'high', 'xhigh']
+        if (!levels.includes('off')) levels.push('off')
+        const i = levels.indexOf(info.effort)
+        await applyEffortSwitch(levels[(i + 1 + levels.length) % levels.length]!)
+      } catch (err) {
+        store.addNote(`切换思考档位失败：${err instanceof Error ? err.message : String(err)}`)
       }
     }
 
@@ -672,15 +720,16 @@ export const App = defineComponent({
         void pasteImageFromClipboard()
         return
       }
-      // Alt+M 切模型 / Alt+E 切思考强度：与 /model、/effort 无参路径完全同一条代码
+      // Alt+M 切下一个模型 / Alt+E 切下一档思考强度：顺序循环直切，不弹窗
+      //（弹窗走 /model、/effort 无参；守卫与文案在 cycle* 内）
       if (event.altKey && (event.key === 'm' || event.key === 'M')) {
         event.preventDefault()
-        void openModelPicker()
+        void cycleModel()
         return
       }
       if (event.altKey && (event.key === 'e' || event.key === 'E')) {
         event.preventDefault()
-        void openEffortPicker()
+        void cycleEffort()
         return
       }
       if (event.key === 'Escape' && ui.streaming) {
