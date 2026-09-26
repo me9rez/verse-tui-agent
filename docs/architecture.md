@@ -27,7 +27,7 @@
 │                                                                  │
 │  src/  TUI（TypeScript，纯客户端）                                │
 │    cli/terminal.ts ── pnpm dev -- --rpc ──┐                      │
-│    ui/App.ts（命令/版面/落盘编排）    │                           │
+│    ui/（App.ts 装配 + hooks/ + components/）                      │
 │    session/rpc.ts ──────────────────┼── AgentSession 接缝        │
 │    test/rpc.test.ts（无头端到端）     │                           │
 │                                      │ JSON-RPC 2.0 over WebSocket│

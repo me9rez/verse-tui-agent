@@ -229,10 +229,16 @@ src/
   （断言已迁至根 test/：vitest 四文件，见「验证」一节）
   probes/                一次性探针：摸清库行为 + 排版回归
     toolrow.ts / foldmark.ts / foldrule.ts / indent.ts / layout.ts / color.ts / codecolor.ts / complete.ts / promptdebug.ts / welcomedump.ts / session-seed.ts
-  ui/                    界面层
-    App.ts                 组件装配：版面、命令、键盘、对外 AppApi
+  ui/                    界面层（按功能域分治：装配层 + hooks/ 无渲染组合式 + components/ 渲染子组件）
+    App.ts                 装配层：props → hook 串联 → 4 个 TRenderPlane 外壳 → 子组件 → AppApi
     layout.ts              版面坐标（layoutOf）
     texts.ts               命令表（/help 与 / 补全同源）、占位符与空态文案、状态行对齐、输入清洗
+    hooks/                 组合式函数（无渲染）：useShell（唯一 useTerminal）/ useSessionController /
+                           useTurnRuntime / useHarnessMode / useModelControl / useEffortControl /
+                           useImageAttachment / useStatusBar / useSlashCommands / useComposer /
+                           useKeyboardControls
+    components/            渲染子组件：WelcomeBlock / TranscriptPane / StatusStrip / DividerBar /
+                           ComposerRow / CommandPicker / PickerStack（三个选择器收一处装配）
   session/               会话域（接缝 + 实现 + 落盘，一个概念一个目录）
     seam.ts                接缝类型（AgentSession / StreamStep / ToolStep / TurnSink）
     mock.ts                本地剧本（工具步骤真的起子进程）

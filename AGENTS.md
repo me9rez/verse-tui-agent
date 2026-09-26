@@ -63,7 +63,7 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 | 目录 | 内容 |
 |---|---|
 | `src/cli/` | 可执行入口：`terminal.ts`（交互 TUI）、`shot.ts`（出图） |
-| `src/ui/` | `App.ts`（组件装配/命令/键盘/AppApi）、`layout.ts`（版面坐标）、`texts.ts`（命令表与文案） |
+| `src/ui/` | `App.ts`（装配层：props / hook 串联 / 4 个 `TRenderPlane` 外壳 / `AppApi`）、`hooks/`（11 个组合式函数，无渲染）、`components/`（7 个渲染子组件）、`layout.ts`（版面坐标）、`texts.ts`（命令表与文案） |
 | `src/session/` | 接缝 `seam.ts` + 实现 `mock.ts` / `rpc.ts` + `sink.ts`（事件→转写分组）+ `persist/`（落盘） |
 | `src/transcript/` | 转写域：`LineStream` + `TranscriptStore`（分组、可见行过滤、版本号） |
 | `src/core/` | 底座：`config.ts`（gateway 客户端）、`theme.ts`、`syntax.ts`、`text.ts`、`html.ts`、`brand.ts` |
@@ -75,7 +75,7 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 
 | 想加什么 | 改哪里 | 不要碰 |
 |---|---|---|
-| 新的 slash 命令 | `src/ui/texts.ts` 的 `COMMANDS`（**唯一数据源**，`/help` 与 `/` 补全都从它派生）+ `src/ui/App.ts` 的分发分支 + 一个 test | 别在别处再抄一份命令文案 |
+| 新的 slash 命令 | `src/ui/texts.ts` 的 `COMMANDS`（**唯一数据源**，`/help` 与 `/` 补全都从它派生）+ `src/ui/hooks/useSlashCommands.ts` 的分发分支 + 一个 test | 别在别处再抄一份命令文案 |
 | 新工具 / 新 agent 能力 | `backend/rpc_server.py` 的 `create_harness_agent(...)` 装配 | 协议、前端（工具行自动出现） |
 | 新模型 / provider | `~/.verse/config.toml` 的 `[providers.*]` / `[models.*]` | 协议、事件模型 |
 | 新交互能力（审批、diff 预览…） | 新事件 type + `rpc_server.py` 分发 + 前端 `TurnSink` 映射 | 已有字段语义与「一轮一个终态」 |
@@ -114,6 +114,11 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 - **数组/对象的响应式要真响应式**：跨组件共享的配置必须是 `ref`（`src/core/config.ts` 曾用普通 `let` 导致
   `computed` 永久缓存空数组，`/model` 误判 `[models] 为空`）。
 - 改界面文案先看 `src/ui/texts.ts` 有没有现成常量；噪音文案（「（点我展开）」之类）不要加。
+- **UI 按域分治**：`src/ui/hooks/` 只放无渲染的组合式函数，`src/ui/components/` 只放渲染子组件，`App.ts`
+  只做装配（props → hook 串联 → plane 外壳 → 子组件 → `AppApi`）。`useTerminal()` 全仓只在
+  `hooks/useShell.ts` 调**一次**：`TRenderPlane` 是 `inject` 作用域边界，在 plane 内部再调会拿到 plane 版
+  scheduler（只标脏那一个 plane）；其余 hook/组件统一收 `invalidate: () => void` 参数，hook 之间按拓扑序
+  传参注入，不引 provide/inject。`components/` 之间不互相 import（跨域成员由 App 用 `TRenderPlane` 装）。
 
 ## 7. 测试纪律
 
