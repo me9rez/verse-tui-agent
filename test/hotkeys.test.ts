@@ -9,6 +9,8 @@
  *   3. 无 alt 的 m/e 是普通字符，不触发两个分支
  *   4. usage 格式化纯函数：readUsage 映射缓存键、ctxText 百分比、cacheText 命中率、
  *      空 usage → 状态栏退回本地估算（null）
+ *   5. 状态栏窄终端裁切（fitStatus）：100 列 + 真实 usage 下保住模型段与 harness 段、
+ *      先丢 cwd 与 ctx 细节、phase 段保底；宽屏不动任何段
  *
  * 与 smoke 一样传 persist: false：不往仓库 .verse-sessions/ 写测试会话。
  */
@@ -19,6 +21,7 @@ import { App, type AppApi } from '../src/ui/App.ts'
 import { styles } from '../src/core/theme.ts'
 import { rowsToHtml } from '../src/core/html.ts'
 import { cacheText, ctxText, fmtK, readUsage } from '../src/ui/usage.ts'
+import { fitStatus } from '../src/ui/hooks/useStatusBar.ts'
 
 const COLS = 100
 const ROWS = 44
@@ -115,6 +118,43 @@ test('Alt+M / Alt+E 路由与 usage 格式化', { timeout: 300_000 }, async () =
   check('无缓存信息不显示缓存段', cacheText(readUsage({ input_token_count: 100, output_token_count: 5 })!) === null, 'cached 缺席 → null')
   check('全零 usage → null（退回本地估算）', readUsage({}) === null, 'readUsage({})')
   check('fmtK 边界', fmtK(999) === '999' && fmtK(12_345) === '12.3k' && fmtK(99_999) === '100k', 'k 进位')
+
+  // 5. 状态栏窄终端裁切：按信息优先级丢段（dropPrio 与 useStatusBar 的 PRIO 表同值）
+  type Seg = { text: string; dropPrio?: number }
+  const leftSegs = (): Seg[] => [
+    { text: '✻ ready' }, // phase：不标优先级 = 保底，永不丢
+    { text: 'rpc', dropPrio: 11 },
+    { text: 'plan', dropPrio: 9 },
+    { text: 'workbuddy/hy3', dropPrio: 7 },
+    { text: 'D:\\workspace\\verse-tui-agent', dropPrio: 1 },
+  ]
+  const rightSegs = (): Seg[] => [
+    { text: 'rpc · 127.0.0.1:8765', dropPrio: 10 },
+    { text: 'in 3.8k', dropPrio: 6 },
+    { text: 'out 813', dropPrio: 6 },
+    { text: 'ctx 3.8k/192k 2%', dropPrio: 4 },
+    { text: '0 tools', dropPrio: 8 },
+  ]
+  const narrowL = leftSegs()
+  const narrowR = rightSegs()
+  fitStatus(narrowL, narrowR, COLS)
+  const visible = [...narrowL, ...narrowR].map((s) => s.text).join(' · ')
+  check(
+    '100 列下保住模型段与 harness 段',
+    narrowL.some((s) => s.text === 'workbuddy/hy3') && narrowL.some((s) => s.text === 'plan'),
+    visible,
+  )
+  check(
+    '先丢 cwd 与 ctx 细节',
+    !narrowL.some((s) => s.text.startsWith('D:')) && !narrowR.some((s) => s.text.startsWith('ctx')),
+    visible,
+  )
+  check('phase 段永不留失', narrowL[0]?.text === '✻ ready', visible)
+  const wideL = leftSegs()
+  const wideR = rightSegs()
+  fitStatus(wideL, wideR, 200)
+  check('宽屏不动任何段', wideL.length === 5 && wideR.length === 5, `${wideL.length}/${wideR.length}`)
+
   lastScreen = screen()
 })
 

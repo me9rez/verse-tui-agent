@@ -119,6 +119,9 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
   `hooks/useShell.ts` 调**一次**：`TRenderPlane` 是 `inject` 作用域边界，在 plane 内部再调会拿到 plane 版
   scheduler（只标脏那一个 plane）；其余 hook/组件统一收 `invalidate: () => void` 参数，hook 之间按拓扑序
   传参注入，不引 provide/inject。`components/` 之间不互相 import（跨域成员由 App 用 `TRenderPlane` 装）。
+- **状态栏窄终端裁切按优先级来**：`hooks/useStatusBar.ts` 的 `PRIO` 表决定先丢谁（cwd → cache →
+  耗时 → ctx → in/out → 模型名 → tools → harness → 会话名 → 模式），左右两段**一起**参与裁切，phase 段保底。
+  别退回「只丢左段」——右段（usage）变长会把模型段与 harness 段一起带走，`pnpm rpc` 在 100 列下正是守这两段。
 
 ## 7. 测试纪律
 

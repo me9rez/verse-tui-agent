@@ -50,7 +50,7 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm model` | vitest：`/model` 模型选择器 5 项（弹出/↑↓切换/Esc 取消/文本直切/mock 守卫，需后端） |
 | `pnpm effort` | vitest：`/effort` 思考强度 5 项软断言（补全/mock 守卫/选择器回退/HELP 派生，离线） |
 | `pnpm image` | vitest：Alt+V 贴图 4 项软断言（mock 守卫/能力门控/指示条，离线） |
-| `pnpm hotkeys` | vitest：Alt+M/Alt+E 路由 + 状态栏 usage 格式化 10 项软断言（离线） |
+| `pnpm hotkeys` | vitest：Alt+M/Alt+E 路由 + 状态栏 usage 格式化与窄终端裁切 14 项软断言（离线） |
 | `pnpm sessions` | vitest：会话落盘 / 读回（含 usage 持久化）/ 重放 / 记录器 25 项（离线，用临时目录，不碰仓库） |
 | `pnpm config-test` | pytest：后端 TOML 配置 11 函数 35 断言（深合并/overrides/新模型字段/脱敏/坏文件回退，离线） |
 | `pnpm test:backend` | pytest 全量：25 函数 79 断言（protocol 十秒内；agent/switch 打真模型） |
@@ -269,7 +269,7 @@ src/
 
 - **欢迎块**（仅空态）：`v0.1.0` 边框标题 + 紫色像素 V logo + `model`/`cwd` 信息列 + `Tips`（三条命令，desc 与 `/help` 同源于 `COMMANDS`）；下面一行空态提示，再往下是留白。`model` 显示后端握手 `initialize.result.model` 的权威值（rpc 会话创建即连后端回填；`/model` 选择器或 `/model <id>` 切换后跟随更新），不是环境变量。
 - **输入行**：`>` 前缀（accent 色）+ 无边框 `TInput` + 占位符 `问点什么（/ 补全命令 · Enter 发送 · Esc 中断）`，上方一条 `─` 分割线；输入 `/` 弹补全（弹窗画在输入行上方的 overlay 栈）。
-- **状态栏**（底行，多段拼色）：`✻ ready · 模式 · harness 模式 · 模型 · cwd`（左）+ `会话 · in/out · ctx 占用 · cache 命中 · N tools`（右）。跑过 rpc 轮次后，右段显示 LLM 终态返回的真实 usage：`in 12.3k out 678`、`ctx 12.3k/200k 6%`（input / 当前模型 `max_context_size`，没配窗口只显示绝对值）、`cache 8.1k 66%`（端点缓存命中 token 与命中率，端点没回缓存信息就不显示）；usage 随轮次持久化在会话文件里，重进会话 / `/open` 切回自动回填最近一轮（`/new` `/mock` `/rpc` 切走即清空）；没跑过轮次退回本地 token 估算。窄终端从右往左自动丢段（先 cwd 后模型），永不换行溢出。`模型` 段与欢迎块同源（`displayModel` = 握手回填的后端 model id）。
+- **状态栏**（底行，多段拼色）：`✻ ready · 模式 · harness 模式 · 模型 · cwd`（左）+ `会话 · in/out · ctx 占用 · cache 命中 · N tools`（右）。跑过 rpc 轮次后，右段显示 LLM 终态返回的真实 usage：`in 12.3k out 678`、`ctx 12.3k/200k 6%`（input / 当前模型 `max_context_size`，没配窗口只显示绝对值）、`cache 8.1k 66%`（端点缓存命中 token 与命中率，端点没回缓存信息就不显示）；usage 随轮次持久化在会话文件里，重进会话 / `/open` 切回自动回填最近一轮（`/new` `/mock` `/rpc` 切走即清空）；没跑过轮次退回本地 token 估算。窄终端按**信息优先级**丢段，永不换行溢出：左段（phase · 模式 · harness 模式 · 模型 · cwd）与右段（会话 · in/out · ctx 占用 · cache 命中 · N tools · 耗时）一起参与裁切，先丢 cwd、cache 命中、耗时、ctx 占用，再丢 in/out，然后才是模型名与 tools；phase 与 harness 模式段是保底（100 列下实测留住 `✻ ready · rpc · plan · workbuddy/hy3` + `rpc · 127.0.0.1:8765 · in 3.8k · out 841 · 0 tools`）。`模型` 段与欢迎块同源（`displayModel` = 握手回填的后端 model id）。
 
 ## 唯一后端：Agent Framework（WebSocket + JSON-RPC 2.0）
 
