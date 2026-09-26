@@ -20,8 +20,8 @@ import type { TerminalKeyboardEvent } from '@simon_he/vue-tui/runtime'
 import { layoutOf } from './layout.ts'
 import { readClipboardImage } from './clipboard.ts'
 import {
-  COMMANDS, EMPTY_NOTE, HELP, IMAGE_HINT, IMAGE_NOTE_EMPTY, IMAGE_NOTE_MOCK, IMAGE_NOTE_UNSUPPORTED,
-  NL, PLACEHOLDER, imageChip, imageNoteReady, stripControlChars,
+  COMMANDS, EMPTY_NOTE, HELP, IMAGE_HINT, IMAGE_NOTE_EMPTY, IMAGE_NOTE_MOCK,
+  NL, PLACEHOLDER, imageChip, imageNoteDegraded, imageNoteReady, stripControlChars,
 } from './texts.ts'
 import { createTurnSink, type Phase } from '../session/sink.ts'
 import { createTranscriptStore, type TranscriptStore } from '../transcript/index.ts'
@@ -274,10 +274,10 @@ export const App = defineComponent({
       }
     }
 
-    // ── Alt+V 贴图（多模态输入，capabilities.image_in 门控）──────────────
+    // ── Alt+V 贴图（多模态输入）─────────────────────────────────────────
     /** 待发送图片：非空时输入行右端显示指示条，随下一条消息发出后清空。 */
     const pendingImage = ref<{ data: string; bytes: number } | null>(null)
-    /** 当前模型是否声明 image_in：capabilities 是显式追加式标签，未配置 = 不支持（保守）。 */
+    /** 当前模型是否声明 image_in：不支持时图片在请求前被后端投影为文本占位符（请求仍成功）。 */
     const imageSupported = computed<boolean>(() => {
       const alias = backendModel.value || effectiveConfig().default_model
       const m = effectiveConfig().models.find((one) => one.alias === alias)
@@ -286,15 +286,12 @@ export const App = defineComponent({
     const imageChipText = computed(() =>
       pendingImage.value ? imageChip(Math.max(1, Math.round(pendingImage.value.bytes / 1024))) : '',
     )
-    const placeholderText = computed(() => (imageSupported.value ? PLACEHOLDER + IMAGE_HINT : PLACEHOLDER))
-    /** Alt+V：读剪贴板图片 → pendingImage（重复按覆盖）。不支持时给守卫提示。 */
+    const placeholderText = computed(() =>
+      sessionRef.value.kind === 'rpc' ? PLACEHOLDER + IMAGE_HINT : PLACEHOLDER)
+    /** Alt+V：读剪贴板图片 → pendingImage（重复按覆盖）。rpc 一律可贴，是否降级由后端按 capabilities 决定。 */
     async function pasteImageFromClipboard(): Promise<void> {
       if (sessionRef.value.kind !== 'rpc') {
         store.addNote(IMAGE_NOTE_MOCK)
-        return
-      }
-      if (!imageSupported.value) {
-        store.addNote(IMAGE_NOTE_UNSUPPORTED)
         return
       }
       const img = await readClipboardImage()
@@ -303,7 +300,8 @@ export const App = defineComponent({
         return
       }
       pendingImage.value = { data: img.data, bytes: img.bytes }
-      store.addNote(imageNoteReady(Math.max(1, Math.round(img.bytes / 1024))))
+      const kb = Math.max(1, Math.round(img.bytes / 1024))
+      store.addNote(imageSupported.value ? imageNoteReady(kb) : imageNoteDegraded(kb))
     }
 
     /** /open 会话选择器：开关 + 受控高亮 + 条目。

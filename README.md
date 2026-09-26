@@ -95,7 +95,7 @@ tui  agent=rpc speed=1 persist=true · session_dir=…
 | 操作 | 说明 |
 |---|---|
 | `Enter` | 发送当前输入 |
-| **`Alt+V`** | **粘贴剪贴板图片**（当前模型 `capabilities` 需声明 `image_in`；待发图片显示在输入行右端，随下一条消息发出，重复按覆盖） |
+| **`Alt+V`** | **粘贴剪贴板图片**（待发图片显示在输入行右端，随下一条消息发出，重复按覆盖；模型 `capabilities` 未声明 `image_in` 时后端自动降级为文本占位符，请求照常成功） |
 | `Esc` | 中断正在跑的这一轮（转写里写入「已中断」） |
 | `Ctrl+End` | 视口跳回底部 |
 | **`Ctrl+T`** | **折叠 / 展开最近一组**（思考或工具） |
@@ -289,7 +289,8 @@ pnpm effort             # vitest：/effort 思考强度 5 项（离线）
 ```
 请求   {"jsonrpc":"2.0","id":1,"method":"agent/chat","params":{"session":"vt-xxx","prompt":"…"}}
        可选 params.images = [{"media_type":"image/png","data":"<base64>"}]（≤4 张/单图 12MB；
-       模型 capabilities 需声明 image_in，否则 -32602）
+       会话存原图为事实源，模型 capabilities 未声明 image_in 时请求前降级为文本占位符，
+       result 附 images_omitted=N）
 事件   {"jsonrpc":"2.0","method":"agent/event","params":{"event":{"type":"answer_delta","text":"…"}}}
        type: thinking_delta / thinking_end / tool_start / tool_line / tool_end / answer_delta
 终态   {"jsonrpc":"2.0","id":1,"result":{"text":"…","usage":{…}}}    或 error

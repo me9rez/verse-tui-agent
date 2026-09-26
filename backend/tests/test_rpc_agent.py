@@ -87,3 +87,34 @@ def test_cancel掐掉一轮并收到错误码32001(live_server):
                     rpc.events.append(msg["params"]["event"])
                     continue
     _run(inner())
+
+
+def test_带图请求按能力投影后成功(live_server):
+    """真模型验证双向投影（能力自适应，不依赖 config 现状）：
+    - 模型声明 image_in → 图片原样进请求（恒等投影），result 无 images_omitted；
+    - 未声明 → 请求前降级为文本占位符，result.images_omitted == 1。
+    两个方向请求都必须成功（会话事实源里的图片不阻断任何模型）。"""
+    async def inner():
+        async with websockets.connect(RPC_URL, max_size=4 * 1024 * 1024) as ws:
+            rpc = Rpc(ws)
+            cfg = (await rpc.call("config/get", timeout=10)).get("result", {}).get("config", {})
+            init = await rpc.call("initialize", timeout=10)
+            model = init.get("result", {}).get("model")
+            caps = next((m.get("capabilities") or [] for m in cfg.get("models", [])
+                         if m.get("alias") == model), [])
+            supports = "image_in" in caps
+            sid = new_sid("img")
+            r = await rpc.call("agent/chat", {
+                "session": sid,
+                "prompt": "收到一张图。只需回答两个字：收到。",
+                "images": [{"media_type": "image/png",
+                            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}],
+            })
+            res = r.get("result") or {}
+            assert res.get("ok") is True, f"带图请求成功（无论能力） — {str(r.get('error') or res)[:120]}"
+            if supports:
+                assert "images_omitted" not in res, f"image_in 模型恒等投影，无降级回显 — {res.get('images_omitted')}"
+            else:
+                assert res.get("images_omitted") == 1, f"降级时 result 回显 images_omitted=1 — {res.get('images_omitted')}"
+            assert res.get("text"), "模型有回答文本"
+    _run(inner())

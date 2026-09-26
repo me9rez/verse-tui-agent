@@ -144,6 +144,9 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
   PowerShell `Set-Content` / `WriteAllLines` 重写文件（会改编码与换行符，git 看到整个文件被重写）。
 - 会话文件是**明文**（`.verse-sessions/`、`backend/history/` 均已 gitignore）；别把不该落盘的东西粘进对话。
   Alt+V 贴的图片以 data URI 随会话 JSONL 落盘并在后续轮次重发——多图长对话会显著膨胀 token。
+- 图片走「事实 + 投影」模型（`backend/projection.py`）：会话存原图为唯一事实源，非 image_in 模型在
+  请求发出前投影为**确定性文本占位符**（内容哈希派生，逐字节稳定保前缀缓存）；image_in 模型恒等投影。
+  投影函数禁止加入位置/时间等请求态信息——会打爆上游 prompt cache。
 - Windows 剪贴板读图走 PowerShell `Get-Clipboard -Format Image`（`src/ui/clipboard.ts`）：约定无图输出
   `NO-IMAGE`；子进程必须 `windowsHide + maxBuffer 上限 + timeout`（同上条杀进程纪律）。
 - `tsc` 的报错就是门禁（当前 0 错）；`docs/architecture.md` §10 里那条「probes/complete.ts 有遗留报错」的记录已过时。

@@ -57,10 +57,11 @@ export const EMPTY_NOTE = '输入第一条消息，开始新会话。'
 /** Alt+V 贴图文案（App 与 test/image.test.ts 共用判别词，改文案记得同步断言）。 */
 export const IMAGE_HINT = ' · Alt+V 贴图'
 export const IMAGE_NOTE_MOCK = '当前是 mock 剧本，贴不了图；/rpc 切到后端后再用 Alt+V。'
-export const IMAGE_NOTE_UNSUPPORTED = '当前模型未声明 image_in 能力（[models.*].capabilities），Alt+V 不可用。'
 export const IMAGE_NOTE_EMPTY = '剪贴板里没有图片。'
 export const imageNoteReady = (kb: number): string =>
   `图片已就绪（PNG · ${kb}KB · 随下一条消息发送；再按 Alt+V 可替换）。`
+export const imageNoteDegraded = (kb: number): string =>
+  `图片已就绪（PNG · ${kb}KB）。当前模型不支持图片输入，发送时会降级为文本占位符（请求照常成功）。`
 export const imageChip = (kb: number): string => `[图片 PNG · ${kb}KB · 随下一条消息发送]`
 
 /** 左文 + 右文，按列宽对齐（右文贴右边，左文不够长就补空格）。 */

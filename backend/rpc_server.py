@@ -15,8 +15,10 @@ JSON-RPC 2.0 over WebSocket 协议
   {"jsonrpc":"2.0","id":1,"method":"agent/chat",
    "params":{"session":"<sid>","prompt":"<用户输入>"}}
       可选 params.images = [{"media_type":"image/png","data":"<base64>"}]：
-      多模态输入（≤4 张、单图 base64 ≤12MB）；当前模型 capabilities 需声明 image_in，
-      否则 -32602。图片经 Content.from_data 与文本合成一条 user Message 进 harness。
+      多模态输入（≤4 张、单图 base64 ≤12MB）。会话存储的是原始图片（唯一事实源）；
+      当前模型 capabilities 未声明 image_in 时，请求发出前把图片投影为确定性文本占位符
+      （projection.py，逐字节稳定以保前缀缓存），result 附 images_omitted=N。
+      图片经 Content.from_data 与文本合成一条 user Message 进 harness。
   {"jsonrpc":"2.0","id":9,"method":"agent/cancel","params":{"session":"<sid>"}}
       → 应答 {"result":{"cancelled":true|false}}；被取消那轮的 chat 请求另收 -32001 终态
   {"jsonrpc":"2.0","id":2,"method":"agent/reset","params":{"session":"<sid>"}}
@@ -105,6 +107,7 @@ from agent_framework import (
 from websockets.asyncio.server import serve
 
 from config import ConfigError, load_config, resolve_provider_key, sanitize
+from projection import ProjectedOpenAIChatClient, make_chat_preparer
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent
@@ -187,17 +190,23 @@ def _build_agent(model_ref: str):
     api_key = resolve_provider_key(pdef)
     if not api_key:
         raise ConfigError(f"provider {pname!r} 没有 api_key（providers.{pname}.api_key 或其 env 子表）")
+    # capabilities.image_in 门控的是「请求视图」而非请求成败：不支持图片的模型在
+    # 请求发出前把图片投影为确定性文本占位符（projection.py），事实源只读、缓存稳定
+    project_images = not _model_accepts_images(model_ref)
+    # Kimi 同款：模型级 base_url 优先于 provider 的（[models.x].base_url 覆盖 [providers.y].base_url）
+    base_url = str(mdef.get("base_url") or pdef.get("base_url") or "")
     if str(pdef.get("type", "openai")).lower() == "openai_responses":
-        from agent_framework.openai import (
-            OpenAIChatClient as ClientCls,  # Responses API
-        )
+        # Responses API 无 preparer 钩子：用子类覆写 _prepare_request
+        cli = ProjectedOpenAIChatClient(
+            project_images=project_images, model=raw, base_url=(base_url or None), api_key=api_key)
     else:
         from agent_framework.openai import (
             OpenAIChatCompletionClient as ClientCls,  # Chat Completions
         )
-    # Kimi 同款：模型级 base_url 优先于 provider 的（[models.x].base_url 覆盖 [providers.y].base_url）
-    base_url = str(mdef.get("base_url") or pdef.get("base_url") or "")
-    cli = ClientCls(model=raw, base_url=(base_url or None), api_key=api_key)
+        cli = ClientCls(
+            model=raw, base_url=(base_url or None), api_key=api_key,
+            message_preparer=make_chat_preparer(project_images),
+        )
     ag = create_harness_agent(
         # 框架 harness 的注解只认 Responses 家族的 Options 协议，Chat Completions 客户端
         # 运行时完全可用但静态判不兼容（Options 类型缺 include/prompt 等字段）——cast 收窄
@@ -394,6 +403,8 @@ async def _stream_turn(ws, session: str, prompt: str, send_lock,
 
     # 思考档位按轮注入（thinking/set 改全局 EFFORT，下一轮生效；空 = 不发参数）
     run_opts = _effort_run_options()
+    # 图片是否降级由当前模型的 client 投影旗标决定（_build_agent 时已按 capabilities 装配）
+    images_omitted = len(images) if images and not _model_accepts_images(MODEL) else 0
     if images:
         # 多模态：文本 + 图片内容项合成一条 user 消息（AgentRunInputs 接受 Message，
         # Content.from_data 生成 data URI 内容项，编码交给端点）
@@ -451,7 +462,13 @@ async def _stream_turn(ws, session: str, prompt: str, send_lock,
             pending.clear()
             await emit({"type": "thinking_end"})
 
-    return {"ok": True, "text": "".join(answer), "usage": usage}
+    return {
+        "ok": True,
+        "text": "".join(answer),
+        "usage": usage,
+        # 本轮请求中被降级为文本占位符的图片数（支持图片的模型恒缺省——协议只加不改）
+        **({"images_omitted": images_omitted} if images_omitted else {}),
+    }
 
 
 # ── JSON-RPC 分发 ─────────────────────────────────────────────────────
@@ -466,14 +483,11 @@ async def handle_chat(ws, rid, params, tasks, send_lock) -> None:
         await _send(ws, send_lock, _err(rid, -32602, "params.prompt 必须是非空字符串"))
         return
     images = params.get("images")
-    if images is not None:
-        if err := _images_error(images):
-            await _send(ws, send_lock, _err(rid, -32602, err))
-            return
-        if not _model_accepts_images(MODEL):
-            await _send(ws, send_lock, _err(
-                rid, -32602, f"当前模型 {MODEL!r} 未声明 image_in 能力（[models.{MODEL}].capabilities）"))
-            return
+    # 形状/base64/大小校验；capabilities 不再拒绝——不支持图片的模型在请求前
+    # 投影为文本占位符（projection.py），跨模型切换双向都能成功
+    if images is not None and (err := _images_error(images)):
+        await _send(ws, send_lock, _err(rid, -32602, err))
+        return
     try:
         _ensure_agent()   # 参数校验之后才装配：坏参数仍回 -32602，配置缺失才 -32000
     except ConfigError as e:
