@@ -153,7 +153,9 @@ agent  = create_harness_agent(
     client,
     history_provider=FileHistoryProvider(HISTORY_DIR),
     default_options={"store": False},        # Responses 端点必须；chat completions 无害
-    file_access_*_approval=True 的关闭位,      # 协议没有审批通道，文件工具收敛在 WORKSPACE
+    file_access_store=FileSystemAgentFileStore(WORKSPACE),  # 唯一开关：不传 = 没有任何文件工具
+    file_access_disable_write/readonly_tool_approval=True,   # 协议没有审批通道 → 8 件套 never_require
+    disable_file_memory=True,   # 关掉 {cwd}/agent-file-memory，不留第二套文件事实源
     disable_web_search=True,
 )
 ```

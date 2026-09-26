@@ -99,6 +99,7 @@ import websockets
 from agent_framework import (
     Content,
     FileHistoryProvider,
+    FileSystemAgentFileStore,
     Message,
     create_harness_agent,
     get_agent_mode,
@@ -217,9 +218,18 @@ def _build_agent(model_ref: str):
         # 兼容端点（wb2api/8788 等）没有服务端会话：store=False 让本地文件成为历史唯一来源
         default_options={"store": False},
         **_compaction_kwargs(mdef),
-        # 文件/命令工具收敛在 WORKSPACE 内，且不触发审批等待（协议没有审批通道）
+        # 文件工具（file_access_read/write/read_lines/replace/replace_lines/ls/grep/delete）：
+        # FileAccessProvider 是 opt-in，只有传 file_access_store 才装配（不传 = agent 没有任何文件工具）。
+        # 根取 WORKSPACE（已 resolve 的绝对路径）；store 自身拒绝 `..` 与绝对路径逃逸、
+        # 并拒符号链接，所以模型的文件操作锁在沙箱内。根目录懒创建，构造 store 不碰盘。
+        file_access_store=FileSystemAgentFileStore(WORKSPACE),
+        # 协议没有审批通道（pending approval 会让那一轮永远等不到），且工具已经收敛在 WORKSPACE 内
+        # → 只读与写工具一律 never_require，不触发审批等待
         file_access_disable_write_tool_approval=True,
         file_access_disable_readonly_tool_approval=True,
+        # 关掉 FileMemoryProvider：它的默认 store 是 {cwd}/agent-file-memory（cwd = WORKSPACE），
+        # 与上面的 FileAccessProvider 构成两套文件事实源 → 记忆统一走文件工具 + 会话历史
+        disable_file_memory=True,
         disable_web_search=True,
     )
     return cli, ag, raw, pname
