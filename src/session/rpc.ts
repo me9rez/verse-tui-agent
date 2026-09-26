@@ -17,7 +17,7 @@
  * 会话历史在服务端 FileHistoryProvider（每 session 一个 JSONL）；
  * snapshot() 只存服务端 session id，恢复时拿它接回同一份磁盘历史。
  */
-import type { AgentSession, ToolStep, TurnContext } from './seam.ts'
+import type { AgentSession, ThinkingInfo, ToolStep, TurnContext } from './seam.ts'
 import { setBackendModel } from './model.ts'
 import { setBackendMode } from './mode.ts'
 import { DEFAULT_RPC_URL, setBoot, type VerseBoot } from '../core/config.ts'
@@ -281,6 +281,19 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
       const next = typeof r?.mode === 'string' && r.mode ? r.mode : mode
       setBackendMode(next)
       return next
+    },
+
+    /** /effort：thinking/get → 当前档位与模型支持表（选择器数据源） */
+    async getThinking(): Promise<ThinkingInfo> {
+      const sock = await ensureSocket()
+      return (await rpcCall(sock, 'thinking/get')) as ThinkingInfo
+    },
+
+    /** /effort <档位>：thinking/set → 返回后端确认的档位 */
+    async setThinking(effort: string): Promise<string> {
+      const sock = await ensureSocket()
+      const r = (await rpcCall(sock, 'thinking/set', { effort })) as { effort?: unknown } | null
+      return typeof r?.effort === 'string' && r.effort ? r.effort : effort
     },
   }
 }

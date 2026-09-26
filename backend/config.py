@@ -23,6 +23,16 @@ class ConfigError(Exception):
     """配置缺失/非法，携带给人看的中文消息（会变成 -32000 的 error.message）。"""
 
 
+# Kimi Code 同款 [models.*] 字段白名单（config-files.html#models）。
+# overrides 子表禁止覆盖身份与端点三键——Kimi 语义：provider/model/base_url 不接受。
+MODEL_FIELDS: set[str] = {
+    "provider", "model", "max_context_size", "max_input_size", "max_output_size",
+    "capabilities", "support_efforts", "default_effort", "off_effort",
+    "base_url", "display_name", "reasoning_key", "adaptive_thinking",
+}
+OVERRIDE_FORBIDDEN: set[str] = {"provider", "model", "base_url"}
+
+
 DEFAULTS: dict[str, Any] = {
     "default_model": "wb2api/cn:hy3",
     "default_mode": "plan",
@@ -65,6 +75,20 @@ def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def effective_model(mdef: dict[str, Any]) -> dict[str, Any]:
+    """[models."<alias>"] 应用 overrides 覆盖后的 effective 视图（Kimi 同款语义）。
+
+    有 override 的键用 override，否则用顶层字段；overrides 里的 provider/model/base_url
+    被剔除（身份与端点不可覆盖），白名单外的键原样透传（向前兼容新字段）。
+    """
+    over = mdef.get("overrides")
+    if not isinstance(over, dict):
+        return copy.deepcopy(mdef)
+    base = {k: v for k, v in mdef.items() if k != "overrides"}
+    allowed = {k: v for k, v in over.items() if k not in OVERRIDE_FORBIDDEN}
+    return _merge(base, allowed)
+
+
 def load_config(project_root: Path) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """返回 (effective_config, effective_tui, 实际读到的文件绝对路径)。"""
     files: list[str] = []
@@ -74,6 +98,10 @@ def load_config(project_root: Path) -> tuple[dict[str, Any], dict[str, Any], lis
         if data is not None:
             cfg = _merge(cfg, data)
             files.append(str(p.resolve()))
+    # 三文件合并完统一应用 overrides：rpc_server 等消费者拿到的直接是 effective 值
+    for alias, m in list(cfg.get("models", {}).items()):
+        if isinstance(m, dict):
+            cfg["models"][alias] = effective_model(m)
     tui = copy.deepcopy(DEFAULT_TUI)
     p = verse_home() / "tui.toml"
     data = _read_toml(p)
@@ -104,7 +132,16 @@ def sanitize(cfg: dict[str, Any], tui: dict[str, Any]) -> dict[str, Any]:
     models = [
         {"alias": a, "provider": str(m.get("provider", "")), "model": str(m.get("model", "")),
          "max_context_size": int(m.get("max_context_size", 0)),
-         "display_name": str(m.get("display_name") or m.get("model", ""))}
+         "max_input_size": int(m.get("max_input_size", 0)),
+         "max_output_size": int(m.get("max_output_size", 0)),
+         "capabilities": [str(c) for c in m.get("capabilities", [])],
+         "support_efforts": [str(e) for e in m.get("support_efforts", [])],
+         "default_effort": str(m.get("default_effort", "")),
+         "off_effort": str(m.get("off_effort", "")),
+         "base_url": str(m.get("base_url", "")),
+         "display_name": str(m.get("display_name") or m.get("model", "")),
+         "reasoning_key": str(m.get("reasoning_key", "")),
+         "adaptive_thinking": m.get("adaptive_thinking")}
         for a, m in sorted(cfg.get("models", {}).items())
     ]
     return {

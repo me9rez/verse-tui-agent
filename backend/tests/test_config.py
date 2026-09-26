@@ -54,6 +54,62 @@ def test_tui_toml覆盖默认且保留未覆盖键(sandbox):
     assert tui["persist"] is True, tui["persist"]
 
 
+def test_models_overrides深合并与禁止键剔除(sandbox):
+    """Kimi 同款 [models.x.overrides]：effective 值 = 顶层字段被 overrides 覆盖，
+    但 provider/model/base_url 三键不接受覆盖（身份与端点不可改）。"""
+    files = {
+        "home/config.toml": (
+            '[providers.x]\napi_key = "k"\n'
+            '[models.probe]\n'
+            'provider = "x"\n'
+            'model = "m1"\n'
+            'max_context_size = 128000\n'
+            'max_input_size = 96000\n'
+            'max_output_size = 16384\n'
+            'capabilities = ["thinking", "image_in"]\n'
+            'support_efforts = ["low", "high"]\n'
+            'default_effort = "low"\n'
+            'off_effort = "none"\n'
+            'display_name = "Probe A"\n'
+            '[models.probe.overrides]\n'
+            'max_context_size = 200000\n'
+            'display_name = "Probe B"\n'
+            'provider = "evil"\n'
+            'model = "evil-model"\n'
+            'base_url = "http://evil"\n'
+        ),
+    }
+    with sandbox(files) as root:
+        cfg, _, _ = C.load_config(root / "proj")
+        m = cfg["models"]["probe"]
+        view = C.sanitize(cfg, C.DEFAULT_TUI)
+    assert m["max_context_size"] == 200000, m          # override 生效
+    assert m["display_name"] == "Probe B", m           # override 生效
+    assert m["provider"] == "x", m                     # 禁止键被剔除，保留顶层
+    assert m["model"] == "m1" and "base_url" not in m, m
+    assert m["max_input_size"] == 96000 and m["off_effort"] == "none", m
+    entry = next(e for e in view["models"] if e["alias"] == "probe")
+    assert entry["support_efforts"] == ["low", "high"], entry
+    assert entry["capabilities"] == ["thinking", "image_in"], entry
+    assert entry["default_effort"] == "low" and entry["max_output_size"] == 16384, entry
+    assert entry["display_name"] == "Probe B", entry   # sanitize 下发的是 effective 值
+
+
+def test_models_无overrides时字段原样透传(sandbox):
+    files = {
+        "home/config.toml": (
+            '[providers.x]\napi_key = "k"\n'
+            '[models.plain]\nprovider = "x"\nmodel = "m2"\ndefault_effort = "high"\n'
+        ),
+    }
+    with sandbox(files) as root:
+        cfg, _, _ = C.load_config(root / "proj")
+    m = cfg["models"]["plain"]
+    assert m["default_effort"] == "high", m
+    assert m.get("support_efforts", []) == [] and m.get("capabilities", []) == [], m  # 未配字段不物化，消费方 .get 兜底
+    assert "overrides" not in json.dumps(C.sanitize(cfg, C.DEFAULT_TUI)), "overrides 子表不下发"
+
+
 def test_坏toml回退默认并打stderr警告(sandbox):
     buf = io.StringIO()
     with contextlib.redirect_stderr(buf), sandbox({"home/config.toml": "default_model = [broken"}) as root:

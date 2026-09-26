@@ -9,7 +9,22 @@ export type VerseBoot = Readonly<{
     default_mode: string
     gateway: { host: string; port: number; workspace: string; history: string; log_level: string }
     providers: Array<{ name: string; type: string; base_url: string; api_key: string }>
-    models: Array<{ alias: string; provider: string; model: string; max_context_size: number; display_name: string }>
+    models: Array<{
+      alias: string
+      provider: string
+      model: string
+      max_context_size: number
+      max_input_size: number
+      max_output_size: number
+      capabilities: string[]
+      support_efforts: string[]
+      default_effort: string
+      off_effort: string
+      base_url: string
+      display_name: string
+      reasoning_key: string
+      adaptive_thinking: boolean | null
+    }>
     tui: {
       agent: 'mock' | 'rpc'
       speed: number

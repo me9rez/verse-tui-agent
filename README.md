@@ -48,9 +48,10 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm complete` | vitest：slash 命令补全的按键链路 5 项（离线 mock） |
 | `pnpm rpc` | vitest：WebSocket JSON-RPC 后端 8 项（需先起 `pnpm backend`） |
 | `pnpm model` | vitest：`/model` 模型选择器 5 项（弹出/↑↓切换/Esc 取消/文本直切/mock 守卫，需后端） |
+| `pnpm effort` | vitest：`/effort` 思考强度 5 项软断言（补全/mock 守卫/选择器回退/HELP 派生，离线） |
 | `pnpm sessions` | vitest：会话落盘 / 读回 / 重放 / 记录器 24 项（离线，用临时目录，不碰仓库） |
-| `pnpm config-test` | pytest：后端 TOML 配置 9 函数 23 断言（深合并/脱敏/坏文件回退，离线） |
-| `pnpm test:backend` | pytest 全量：20 函数 53 断言（protocol 十秒内；agent/switch 打真模型） |
+| `pnpm config-test` | pytest：后端 TOML 配置 11 函数 35 断言（深合并/overrides/新模型字段/脱敏/坏文件回退，离线） |
+| `pnpm test:backend` | pytest 全量：23 函数 73 断言（protocol 十秒内；agent/switch 打真模型） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm build` | tsdown 编译 `src/cli` 两个入口到 `dist/`（`bin`: `verse` → `dist/terminal.mjs`，带 shebang 可直接执行） |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
@@ -69,6 +70,11 @@ gateway 的 `config/get`（JSON-RPC 2.0）拿脱敏视图；连不上（离线 m
 | `<repo>/.verse/local.toml` | gateway | 项目级覆盖，**深合并**（同 schema），已 gitignore |
 
 - 三者按 `默认值 ← config.toml ← 项目 local.toml` 深合并（标量替换、表递归合并）；坏 TOML 只警告并回退，不中断启动。
+- `[models."<别名>"]` 支持 Kimi Code 同款字段：`max_context_size` / `max_input_size` / `max_output_size`
+  （配了即启用 harness 历史压缩）、`capabilities` / `support_efforts` / `default_effort` / `off_effort`
+  （`/effort` 思考强度档位）、模型级 `base_url` 覆盖、`display_name` / `reasoning_key` / `adaptive_thinking`，
+  以及 `[models."<别名>".overrides]` 覆盖子表（`provider`/`model`/`base_url` 三键不接受覆盖）——
+  全部可选，不配 = 行为不变；字段明细见 `docs/config.example.toml`。
 - 唯一环境变量 `VERSE_HOME`：整体换数据目录（此时配置变为 `$VERSE_HOME/config.toml`），对标 Kimi 的 `KIMI_CODE_HOME`。
 - **一次性覆盖用 CLI flag**（每次运行生效）：`--rpc/--mock`、`--speed <n>`、`--url <ws://…>`、`--continue/-c`、`--session <id|last>`、`--debug-input`。
 - 模型与密钥**只在 `config.toml`**：`config/get` 只回 `***set***`（或空串），明文 key 永不出后端。
@@ -96,7 +102,7 @@ tui  agent=rpc speed=1 persist=true · session_dir=…
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
 | **输入 `/`** | **命令自动补全**：↑↓ 选择 · Enter/Tab 采用（再按 Enter 发送）· 模糊匹配、与 `/help` 同一张命令表 |
 | **Shift+Tab** | **切 harness 模式 plan ↔ execute**（仅 rpc；状态栏独立模式段显示当前值，plan 高亮；mock 提示不支持） |
-| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model [<id>]`（无参弹模型选择器，带 id 直切） `/exit` |
+| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model [<id>]`（无参弹模型选择器，带 id 直切） `/effort [<档位>]`（无参弹思考强度选择器：low/medium/high/xhigh/max/off，带档位直切） `/exit` |
 | 会话 | `/sessions` 列表（▶ = 当前）· `/open [序号\|id]`（无参弹选择器）切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
 `/long` 会吐一段长回答，专门用来看长内容下的增量重绘与滚动保持。
@@ -269,10 +275,11 @@ pnpm backend
 pnpm dev -- --rpc         # 或 tui.toml 设 agent = "rpc"，或 TUI 里敲 /rpc
 
 # 3. 断言（协议级 + 无头端到端）
-pnpm config-test        # pytest：配置 9 函数 23 断言
-pnpm test:backend       # pytest 全量 20 函数 53 断言（或 uv run pytest tests/test_rpc_protocol.py -q 只跑协议）
+pnpm config-test        # pytest：配置 11 函数 35 断言
+pnpm test:backend       # pytest 全量 23 函数 73 断言（或 uv run pytest tests/test_rpc_protocol.py -q 只跑协议）
 pnpm rpc                # vitest：TUI↔后端真实链路 8 项
 pnpm model              # vitest：/model 选择器 5 项
+pnpm effort             # vitest：/effort 思考强度 5 项（离线）
 ```
 
 协议（JSON-RPC 2.0 over WebSocket，**权威定义见 `backend/rpc_server.py` 模块 docstring**）：
@@ -356,8 +363,9 @@ pnpm model              # vitest：/model 选择器 5 项
 | `pnpm smoke` | mock 剧本的渲染链路（vitest） | 27 软断言 |
 | `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（vitest，需 `pnpm backend` 在跑） | 8 |
 | `pnpm complete` | slash 命令补全的按键注入链路（vitest，离线 mock） | 5 |
-| `pnpm config-test` | TOML 配置：三文件深合并 / 脱敏 / 坏文件回退（pytest） | 23 |
-| `backend/tests/test_rpc_*.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/`config/get`（pytest，拆 protocol 17 + agent 7） | 24 |
+| `pnpm effort` | `/effort` 思考强度：补全 / mock 守卫 / 选择器回退 / HELP 派生（vitest，离线 mock） | 5 |
+| `pnpm config-test` | TOML 配置：三文件深合并 / overrides / Kimi 同款模型字段 / 脱敏 / 坏文件回退（pytest） | 35 |
+| `backend/tests/test_rpc_*.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/thinking 档位/`config/get`（pytest，拆 protocol 25 + agent 7） | 32 |
 | `backend/tests/test_switch.py` | 协议级：会话切换/隔离/重连恢复（pytest） | 6 |
 | `pnpm sessions` | 会话落盘 / 读回 / 重放 / 记录器（vitest，临时目录） | 24 |
 

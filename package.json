@@ -23,6 +23,7 @@
     "rpc": "vitest run test/rpc.test.ts",
     "model": "vitest run test/model.test.ts",
     "open": "vitest run test/open.test.ts",
+    "effort": "vitest run test/effort.test.ts",
     "complete": "vitest run test/complete.test.ts",
     "build": "tsdown",
     "backend": "cd backend && uv run python rpc_server.py",

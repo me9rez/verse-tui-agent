@@ -27,6 +27,16 @@ JSON-RPC 2.0 over WebSocket 协议
       → {"result":{"config":<脱敏视图>,"sources":[实际读到的 toml 绝对路径]}}
       → config.providers[].api_key 恒为 "***set***"|"",明文永不下发；
         gateway.workspace/history 为服务端解析后的绝对路径；tui = TUI 偏好生效值。
+        config.thinking.effort = 当前思考档位（运行时状态，非 toml 配置，见 thinking/set）。
+  {"jsonrpc":"2.0","id":10,"method":"thinking/get"}
+      → 应答 {"result":{"effort":"low|medium|high|xhigh|max|off|", "model":"<当前模型>",
+             "support_efforts":[...], "default_effort":..., "off_effort":..., "capabilities":[...]}}
+      → support_efforts 为空（模型没配）时回默认档位表 low/medium/high/xhigh。
+  {"jsonrpc":"2.0","id":11,"method":"thinking/set","params":{"effort":"<档位>"}}
+      → 应答 {"result":{"effort":"<生效档位>"}}；空参数/不在 support_efforts → -32602。
+      → 语义：思考强度（Kimi [models.*].support_efforts/default_effort/off_effort），全局状态，
+        下一轮 chat 生效；与 model/set 不同——不重建 harness，plan/todos 不受影响。
+        "off" 映射到模型的 off_effort（没配则发端点通用的 "none"）；EFFORT 空 = 不发思考参数。
   {"jsonrpc":"2.0","id":8,"method":"mode/get","params":{"session":"<sid>"}}
       → 应答 {"result":{"session":"<sid>","mode":"plan"|"execute"}}
   {"jsonrpc":"2.0","id":9,"method":"mode/set","params":{"session":"<sid>","mode":"plan"|"execute"}}
@@ -122,10 +132,14 @@ log = logging.getLogger("verse-agent-rpc")
 DEFAULT_MODEL_ALIAS = str(CFG.get("default_model", ""))
 DEFAULT_MODE = str(CFG.get("default_mode", "plan"))
 
-def _resolve(model_ref: str) -> tuple[str, str, dict]:
-    """model ref（[models] 别名，或裸 model id）→ (provider 名, 真实 model id, provider 表)。"""
-    mdef = CFG["models"].get(model_ref)
-    if mdef is None:  # 裸 id：绑到 default_model 所属 provider（向后兼容 model/set 传裸 id）
+def _resolve(model_ref: str) -> tuple[str, str, dict, dict]:
+    """model ref（[models] 别名，或裸 model id）→ (provider 名, 真实 model id, provider 表, 模型表)。
+
+    模型表是 load_config 应用过 overrides 的 effective 视图；裸 id 没有别名表，返回空 dict
+    （向后兼容 model/set 传裸 id——绑到 default_model 所属 provider）。
+    """
+    mdef = CFG["models"].get(model_ref) or {}
+    if not mdef:  # 裸 id：绑到 default_model 所属 provider（向后兼容 model/set 传裸 id）
         d = CFG["models"].get(DEFAULT_MODEL_ALIAS)
         if d is None:
             raise ConfigError(f"default_model {DEFAULT_MODEL_ALIAS!r} 不在 [models] 里（检查 config.toml）")
@@ -135,7 +149,26 @@ def _resolve(model_ref: str) -> tuple[str, str, dict]:
     pdef = CFG["providers"].get(pname)
     if pdef is None:
         raise ConfigError(f"providers 里没有 {pname!r}（检查 config.toml / local.toml）")
-    return pname, raw, pdef
+    return pname, raw, pdef, mdef
+
+
+DEFAULT_MAX_OUTPUT_TOKENS = 16_384   # max_context_size 配了但 max_output_size 没配时的输出预留
+
+
+def _compaction_kwargs(mdef: dict) -> dict[str, Any]:
+    """Kimi 同款上下文三件套 → harness 压缩预算（ContextWindowCompactionStrategy）。
+
+    不配 max_context_size = 完全不启用压缩（现状行为）。策略的 input_budget = 窗口 - 输出；
+    max_input_size（Kimi：压缩/溢出预算优先用它）通过 window = min(ctx, in + out) 让
+    input_budget 恰好等于 min(max_input_size, ctx - out)，绝不虚高过真实窗口。
+    """
+    max_ctx = int(mdef.get("max_context_size") or 0)
+    if max_ctx <= 0:
+        return {}
+    max_out = int(mdef.get("max_output_size") or 0) or DEFAULT_MAX_OUTPUT_TOKENS
+    max_in = int(mdef.get("max_input_size") or 0)
+    window = min(max_ctx, max_in + max_out) if max_in > 0 else max_ctx
+    return {"max_context_window_tokens": window, "max_output_tokens": max_out}
 
 
 def _build_agent(model_ref: str):
@@ -144,7 +177,7 @@ def _build_agent(model_ref: str):
     切换 = 整体重建：plan/todos（内存 SessionStore）随之重置，
     对话历史在 FileHistoryProvider 磁盘 JSONL 里不受影响。
     """
-    pname, raw, pdef = _resolve(model_ref)
+    pname, raw, pdef, mdef = _resolve(model_ref)
     api_key = resolve_provider_key(pdef)
     if not api_key:
         raise ConfigError(f"provider {pname!r} 没有 api_key（providers.{pname}.api_key 或其 env 子表）")
@@ -156,7 +189,9 @@ def _build_agent(model_ref: str):
         from agent_framework.openai import (
             OpenAIChatCompletionClient as ClientCls,  # Chat Completions
         )
-    cli = ClientCls(model=raw, base_url=(pdef.get("base_url") or None), api_key=api_key)
+    # Kimi 同款：模型级 base_url 优先于 provider 的（[models.x].base_url 覆盖 [providers.y].base_url）
+    base_url = str(mdef.get("base_url") or pdef.get("base_url") or "")
+    cli = ClientCls(model=raw, base_url=(base_url or None), api_key=api_key)
     ag = create_harness_agent(
         # 框架 harness 的注解只认 Responses 家族的 Options 协议，Chat Completions 客户端
         # 运行时完全可用但静态判不兼容（Options 类型缺 include/prompt 等字段）——cast 收窄
@@ -166,6 +201,7 @@ def _build_agent(model_ref: str):
         history_provider=FileHistoryProvider(HISTORY_DIR),
         # 兼容端点（wb2api/8788 等）没有服务端会话：store=False 让本地文件成为历史唯一来源
         default_options={"store": False},
+        **_compaction_kwargs(mdef),
         # 文件/命令工具收敛在 WORKSPACE 内，且不触发审批等待（协议没有审批通道）
         file_access_disable_write_tool_approval=True,
         file_access_disable_readonly_tool_approval=True,
@@ -180,6 +216,7 @@ def _build_agent(model_ref: str):
 MODEL = DEFAULT_MODEL_ALIAS      # 当前 model 的权威回显（initialize.result.model）
 PROVIDER = ""                    # 当前 provider 表名
 client = agent = None
+EFFORT = ""                      # 当前思考档位（Kimi 同款语义；空 = 不向端点发思考参数）
 
 
 def _ensure_agent() -> None:
@@ -187,6 +224,61 @@ def _ensure_agent() -> None:
     global client, agent, PROVIDER
     if agent is None:
         client, agent, _, PROVIDER = _build_agent(MODEL)
+        _calibrate_effort(MODEL)
+
+
+# ── 思考档位（thinking，Kimi Code 同款语义）──────────────────────────
+# support_efforts 配了就强校验（列表外 -32602）；没配用默认档位表（不含 max——responses
+# 客户端的 ReasoningOptions.effort 上限是 xhigh，配了 support_efforts 才按配置透传）。
+# off 是用户-facing 档位：下发时映射到 off_effort（没配则端点通用的 "none"）。
+# EFFORT 是全局状态（对齐 model/set），但切换不重建 harness——每轮 run options 注入，
+# plan/todos 不受影响。模型没配 default_effort/support_efforts 时 EFFORT 保持空 = 不发参数。
+DEFAULT_EFFORT_LEVELS = ["low", "medium", "high", "xhigh"]
+
+
+def _thinking_support(model_ref: str) -> dict[str, Any]:
+    """模型的 thinking 能力视图（effective 模型表；裸 id / 未配置字段给空值）。"""
+    mdef = CFG["models"].get(model_ref) or {}
+    return {
+        "support_efforts": [str(e) for e in mdef.get("support_efforts", [])],
+        "default_effort": str(mdef.get("default_effort", "")),
+        "off_effort": str(mdef.get("off_effort", "")),
+        "capabilities": [str(c) for c in mdef.get("capabilities", [])],
+    }
+
+
+def _calibrate_effort(model_ref: str) -> None:
+    """装配/切模型后校准 EFFORT：当前档位仍被支持（或模型没配支持表）就保留，
+    否则回落 default_effort；空 EFFORT 也借此吃到模型默认档。"""
+    global EFFORT
+    sup = _thinking_support(model_ref)
+    if EFFORT and sup["support_efforts"] and EFFORT not in sup["support_efforts"]:
+        log.info("思考档位 %r 不在模型 %s 的 support_efforts 里，回落 default_effort=%r",
+                 EFFORT, model_ref, sup["default_effort"])
+        EFFORT = sup["default_effort"]
+    elif not EFFORT:
+        EFFORT = sup["default_effort"]
+
+
+def _effort_wire_value() -> str | None:
+    """EFFORT → 发给端点的 effort 编码；None = 不发参数（完全向后兼容）。"""
+    if not EFFORT:
+        return None
+    if EFFORT == "off":
+        return _thinking_support(MODEL)["off_effort"] or "none"
+    return EFFORT
+
+
+def _effort_run_options() -> dict[str, Any] | None:
+    """当前档位 → agent.run 的 options，键形按 provider type 分：responses 用嵌套
+    reasoning.effort，chat completions 用顶层 reasoning_effort（库原样透传给 SDK）。"""
+    effort = _effort_wire_value()
+    if effort is None:
+        return None
+    pdef = CFG["providers"].get(PROVIDER) or {}
+    if str(pdef.get("type", "openai")).lower() == "openai_responses":
+        return {"reasoning": {"effort": effort}}
+    return {"reasoning_effort": effort}
 
 
 try:
@@ -251,7 +343,9 @@ async def _stream_turn(ws, session: str, prompt: str, send_lock) -> dict[str, An
         async with send_lock:
             await ws.send(json.dumps(_event(session, ev), ensure_ascii=False))
 
-    async for chunk in agent.run(prompt, session=sess, stream=True):
+    # 思考档位按轮注入（thinking/set 改全局 EFFORT，下一轮生效；空 = 不发参数）
+    run_opts = _effort_run_options()
+    async for chunk in agent.run(prompt, session=sess, stream=True, options=run_opts):
         for c in chunk.contents:
             ctype = getattr(c, "type", "")
             if ctype == "text":
@@ -355,8 +449,9 @@ async def _send(ws, lock, payload: dict[str, Any]) -> None:
 
 async def handler(ws) -> None:
     """一条连接的收发循环：请求分发 + 每连接串行化发送。"""
-    # model/set 会换掉模块级的 MODEL/PROVIDER/client/agent（全局，只加不改的协议扩展）
-    global MODEL, PROVIDER, client, agent
+    # model/set 会换掉模块级的 MODEL/PROVIDER/client/agent（全局，只加不改的协议扩展）；
+    # thinking/set 换 EFFORT（同属全局状态，见 handler 的 thinking/set 分支）
+    global MODEL, PROVIDER, client, agent, EFFORT
     remote = getattr(ws, "remote_address", None)
     log.info("连接 %s", remote)
     send_lock = asyncio.Lock()
@@ -415,10 +510,33 @@ async def handler(ws) -> None:
                     "server": "verse-agent-backend", "version": "1.0.0",
                     "provider": PROVIDER, "model": MODEL,
                     "methods": ["initialize", "ping", "agent/chat", "agent/cancel", "agent/reset",
-                                "model/set", "mode/get", "mode/set", "config/get"]}})
-            elif method == "config/get":                   # 脱敏配置视图 + 实际读到的 toml（明文 key 永不下发）
+                                "model/set", "thinking/get", "thinking/set",
+                                "mode/get", "mode/set", "config/get"]}})
+            elif method == "thinking/get":                 # 读当前思考档位与模型支持表
+                sup = _thinking_support(MODEL)
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
-                    "config": sanitize(CFG, TUI), "sources": CFG_FILES}})
+                    "effort": EFFORT, "model": MODEL,
+                    "support_efforts": sup["support_efforts"] or DEFAULT_EFFORT_LEVELS,
+                    "default_effort": sup["default_effort"], "off_effort": sup["off_effort"],
+                    "capabilities": sup["capabilities"]}})
+            elif method == "thinking/set":                 # 设思考档位（全局，下一轮生效，不重建 harness）
+                val = str(params.get("effort") or "").strip().lower()
+                sup = _thinking_support(MODEL)
+                allowed = sup["support_efforts"] or DEFAULT_EFFORT_LEVELS
+                if not val:
+                    await _send(ws, send_lock, _err(rid, -32602, "params.effort 必须是非空字符串"))
+                elif val != "off" and val not in allowed:
+                    await _send(ws, send_lock, _err(
+                        rid, -32602, f"effort {val!r} 不受支持（可选：{'/'.join([*allowed, 'off'])}）"))
+                else:
+                    EFFORT = val
+                    log.info("思考档位切换为 %s（model=%s）", EFFORT or "（未设置）", MODEL)
+                    await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {"effort": EFFORT}})
+            elif method == "config/get":                   # 脱敏配置视图 + 实际读到的 toml（明文 key 永不下发）
+                view = sanitize(CFG, TUI)
+                view["thinking"] = {"effort": EFFORT}      # 前端重连后恢复档位显示（不进 toml，非配置）
+                await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {
+                    "config": view, "sources": CFG_FILES}})
             elif method == "model/set":                    # 切服务端默认模型（重建 client+harness）
                 new_model = str(params.get("model") or "").strip()
                 if not new_model:
@@ -433,6 +551,7 @@ async def handler(ws) -> None:
                         await _send(ws, send_lock, _err(rid, -32000, str(e)))
                     else:
                         client, agent, MODEL, PROVIDER = new_client, new_agent, new_model, pname
+                        _calibrate_effort(new_model)   # 新模型不支持当前档位时回落 default_effort
                         _SESSION_CACHE.clear()   # 旧会话对象的 provider state 归属旧 agent，一并丢弃
                         log.info("model 切换为 %s（harness 已重建，plan/todos/mode 重置，磁盘历史保留）", MODEL)
                         await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid, "result": {

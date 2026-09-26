@@ -30,6 +30,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { cmd: '/mock', desc: '切回本地剧本' },
   { cmd: '/fold', desc: '折叠/展开全部（同一个 Ctrl+O）' },
   { cmd: '/model', usage: '[<id>]', desc: '弹出模型选择器；带 id 直切（plan/todos 会重置）' },
+  { cmd: '/effort', usage: '[<档位>]', desc: '弹出思考强度选择器；带档位直切（low/medium/high/xhigh/max/off）' },
   { cmd: '/exit', desc: '退出' },
 ]
 

@@ -214,6 +214,62 @@ export const App = defineComponent({
       }
     }
 
+    // ── /effort 思考强度选择器（与 /model 同机制平移）────────────────────
+    const effortPickerOpen = ref(false)
+    const effortSelIdx = ref(0)
+    /** 当前思考档位：thinking/get 回填 + /effort 切换后更新（空 = 后端未设置/不发光标参数） */
+    const backendEffort = ref('')
+    /** 条目在打开瞬间从 thinking/get 构建存 ref（异步取数无响应式依赖，同 sessionPickerItems 理由）。 */
+    const effortItems = ref<TCommandPaletteItem[]>([])
+    /** /effort 切换的共用实现：选择器 Enter 与 /effort <档位> 文本路径走同一套守卫、调用与文案。 */
+    async function applyEffortSwitch(level: string): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote('当前是 mock 剧本，没有思考档位；/rpc 切到后端后再用 /effort <档位>。')
+        return
+      }
+      if (ui.streaming) {
+        store.addNote('⚠ 本轮还在跑，等结束再切换思考档位。')
+        return
+      }
+      try {
+        const next = await sessionRef.value.setThinking?.(level.toLowerCase())
+        if (!next) store.addNote('后端不支持 thinking/set（需要更新 rpc_server.py）。')
+        else {
+          backendEffort.value = next
+          store.addNote(
+            `思考档位已切换为 ${next}：下一轮生效（off = 关闭思考；模型不支持时后端回 -32602）。`,
+          )
+        }
+      } catch (err) {
+        store.addNote(`切换失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    /** 打开选择器：thinking/get 取当前档位与支持表（模型没配就回默认档位表 + off 尾项）。 */
+    async function openEffortPicker(): Promise<void> {
+      try {
+        const info = await sessionRef.value.getThinking?.()
+        if (!info) {
+          store.addNote('后端不支持 thinking/get（需要更新 rpc_server.py）。')
+          return
+        }
+        backendEffort.value = info.effort
+        const levels = info.support_efforts.length ? info.support_efforts : ['low', 'medium', 'high', 'xhigh']
+        if (!levels.includes('off')) levels.push('off')
+        effortItems.value = levels.map((lv) => ({
+          label: lv,
+          detail: lv === info.effort ? '（当前）' : lv === 'off' ? '关闭思考' : '',
+          value: lv,
+          keywords: [lv],
+        }))
+        effortSelIdx.value = Math.max(0, levels.indexOf(info.effort))
+        modelPickerOpen.value = false // 两个选择器互斥，别叠开
+        sessionPickerOpen.value = false
+        effortPickerOpen.value = true
+      } catch (err) {
+        store.addNote(`读取思考档位失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
     /** /open 会话选择器：开关 + 受控高亮 + 条目。
      *  条目在打开瞬间构建存 ref（fs 读盘无响应式依赖——用 computed 会像 boot 那次
      *  一样把首帧的死值缓存住），当前会话高亮同样在打开前预置。 */
@@ -484,6 +540,20 @@ export const App = defineComponent({
             }
           } else {
             await applyModelSwitch(arg)
+          }
+        } else if (cmd === '/effort' || cmd.startsWith('/effort ')) {
+          const arg = raw.trim().slice(7).trim()
+          if (!arg) {
+            // 无参 = 弹思考强度选择器（rpc 才有档位可切；否则回退提示）
+            if (sessionRef.value.kind !== 'rpc') {
+              store.addNote(`当前是 mock 剧本，没有思考档位；/rpc 切到后端后再用 /effort <档位>。`)
+            } else if (ui.streaming) {
+              store.addNote('⚠ 本轮还在跑，等结束再切换思考档位。')
+            } else {
+              await openEffortPicker()
+            }
+          } else {
+            await applyEffortSwitch(arg)
           }
         } else if (cmd === '/env') {
           // 配置展示的唯一来源：gateway 的 config/get（脱敏视图 + 实际读到的 toml）
@@ -851,6 +921,30 @@ export const App = defineComponent({
               const target = listSessions().find((s) => s.id === id) ?? loadSession(id)
               if (target) switchToSession(target)
               else store.addNote(`会话「${id}」已不存在（可能被删了）。`)
+            },
+          }),
+          // /effort 思考强度选择器：与 /model 同挂 overlay plane（条目来自 thinking/get）
+          h(TCommandPalette, {
+            modelValue: effortPickerOpen.value,
+            'onUpdate:modelValue': (v: boolean) => {
+              effortPickerOpen.value = v
+            },
+            title: '思考强度',
+            placeholder: '输入过滤…',
+            hint: '↑↓ 选择 · Enter 切换 · Esc 取消',
+            items: effortItems.value,
+            showRowDetails: true,
+            closeOnSelect: true,
+            resetQueryOnClose: true,
+            maxVisibleItems: 8,
+            w: Math.max(30, Math.min(cols - 4, pickerRowWidth(effortItems.value))),
+            h: Math.max(8, 7 + Math.min(effortItems.value.length, 8)),
+            selectedIndex: effortSelIdx.value,
+            'onUpdate:selectedIndex': (i: number) => {
+              effortSelIdx.value = i
+            },
+            onSelect: (p: { item: TCommandPaletteItem }) => {
+              void applyEffortSwitch(String(p.item.value))
             },
           }),
         ]),

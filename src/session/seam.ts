@@ -46,6 +46,16 @@ export type TurnContext = {
   sleep: (ms: number) => Promise<void>
 }
 
+/** thinking/get 的应答：与 rpc_server.py 的 thinking/get result 同形。 */
+export type ThinkingInfo = {
+  effort: string
+  model: string
+  support_efforts: string[]
+  default_effort: string
+  off_effort: string
+  capabilities: string[]
+}
+
 import type { SessionKind } from './persist/model.ts'
 
 export type AgentSession = {
@@ -57,6 +67,10 @@ export type AgentSession = {
   respond(prompt: string, ctx: TurnContext): Promise<void>
   /** 切换后端模型（/model <id>）：返回后端确认的 model id；不支持的后端（mock）不实现 */
   setModel?(id: string): Promise<string>
+  /** 读思考档位与当前模型的支持表（/effort 选择器数据源）；不支持的后端（mock）不实现 */
+  getThinking?(): Promise<ThinkingInfo>
+  /** 切思考档位（/effort <档位>）：返回后端确认的档位；不支持的后端（mock）不实现 */
+  setThinking?(effort: string): Promise<string>
   /** 切 harness 模式（Shift+Tab）：返回切换后的模式；同值切换不重复通知 */
   setMode?(mode: string): Promise<string>
   /** 把「与服务端上下文有关的状态」导出成可 JSON 化的值（没有就返回 undefined） */

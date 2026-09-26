@@ -45,6 +45,37 @@ def test_config_get脱敏与结构(live_server):
     _run(inner())
 
 
+def test_thinking档位读写校验与持久(live_server):
+    async def inner():
+        async with websockets.connect(RPC_URL) as ws:
+            rpc = Rpc(ws)
+            r = await rpc.call("thinking/get", timeout=10)
+            res = r.get("result") or {}
+            assert res.get("model"), f"thinking/get 回当前模型 — {res or r.get('error')}"
+            assert isinstance(res.get("support_efforts"), list) and res["support_efforts"], \
+                f"thinking/get 回支持档位表（模型没配也回默认表） — {res}"
+            orig = res.get("effort", "")
+            legal = res["support_efforts"][0]
+            r = await rpc.call("thinking/set", {"effort": legal}, timeout=10)
+            assert r.get("result", {}).get("effort") == legal, \
+                f"thinking/set 合法档位回显 — {r.get('result') or r.get('error')}"
+            r = await rpc.call("thinking/set", {"effort": "off"}, timeout=10)
+            assert r.get("result", {}).get("effort") == "off", \
+                f"off 恒合法（下发映射 off_effort/none） — {r.get('result') or r.get('error')}"
+            r = await rpc.call("thinking/get", timeout=10)
+            assert r.get("result", {}).get("effort") == "off", f"档位跨调用持久 — {r.get('result')}"
+            r = await rpc.call("thinking/set", {"effort": "turbo"}, timeout=10)
+            assert r.get("error", {}).get("code") == -32602, f"列表外档位 → -32602 — {r.get('error')}"
+            r = await rpc.call("thinking/set", {"effort": ""}, timeout=10)
+            assert r.get("error", {}).get("code") == -32602, f"空 effort → -32602 — {r.get('error')}"
+            r = await rpc.call("config/get", timeout=10)
+            assert "thinking" in (r.get("result", {}).get("config") or {}), \
+                "config/get 附带 thinking 运行时状态"
+            if orig:
+                await rpc.call("thinking/set", {"effort": orig}, timeout=10)  # 还原，不污染后续验证
+    _run(inner())
+
+
 def test_错误路径(live_server):
     async def inner():
         async with websockets.connect(RPC_URL) as ws:
