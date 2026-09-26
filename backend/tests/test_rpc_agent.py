@@ -38,7 +38,7 @@ def test_同session跨轮上下文(live_server):
             sid = new_sid("ctx")
             await rpc.call("agent/chat", {"session": sid, "prompt": "记住：我叫小明，最喜欢蓝色。一句话确认。"})
             rpc.drain()
-            r = await rpc.call("agent/chat", {"session": sid, "prompt": "我叫什么？最喜欢什么颜色？只答结论。"})
+            await rpc.call("agent/chat", {"session": sid, "prompt": "我叫什么？最喜欢什么颜色？只答结论。"})
             text = "".join(e["text"] for e in rpc.drain() if e["type"] == "answer_delta")
             assert "小明" in text and "蓝" in text, f"同 session 跨轮上下文 — 回答：{text[:60]}"
     _run(inner())

@@ -56,9 +56,8 @@ def test_tui_toml覆盖默认且保留未覆盖键(sandbox):
 
 def test_坏toml回退默认并打stderr警告(sandbox):
     buf = io.StringIO()
-    with contextlib.redirect_stderr(buf):
-        with sandbox({"home/config.toml": "default_model = [broken"}) as root:
-            cfg, _, _ = C.load_config(root / "proj")
+    with contextlib.redirect_stderr(buf), sandbox({"home/config.toml": "default_model = [broken"}) as root:
+        cfg, _, _ = C.load_config(root / "proj")
     assert cfg["default_model"] == C.DEFAULTS["default_model"], cfg["default_model"]
     assert "解析失败" in buf.getvalue(), buf.getvalue()[:80]
 

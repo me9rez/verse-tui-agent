@@ -54,6 +54,8 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm build` | tsdown 编译 `src/cli` 两个入口到 `dist/`（`bin`: `verse` → `dist/terminal.mjs`，带 shebang 可直接执行） |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
+| `pnpm typecheck:backend` | pyright 检查 `backend/`（读 `backend/.venv`，零报错；配置在 `backend/pyproject.toml` 的 `[tool.pyright]`） |
+| `pnpm lint:backend` | ruff 检查 `backend/`（零报错；`src` 配置在 `backend/pyproject.toml` 的 `[tool.ruff]`） |
 
 ## 配置：三份 TOML（Kimi Code 同款格式）
 

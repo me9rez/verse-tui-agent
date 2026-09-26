@@ -28,6 +28,8 @@ Verse —— 用 Vue 3 + `@simon_he/vue-tui` 搭的**终端流式 agent TUI**，
 | `pnpm dev -- --list-sessions` | 列出落盘会话后退出（无头可用） | 否 | 否 |
 | `pnpm backend` | 起唯一后端 `ws://127.0.0.1:8765` | — | 否 |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（当前 **0 报错**，是硬门禁） | 否 | 否 |
+| `pnpm typecheck:backend` | pyright 检查 `backend/`（当前 **0 报错**；配置在 `backend/pyproject.toml` `[tool.pyright]`，走 uv venv） | 否 | 否 |
+| `pnpm lint:backend` | ruff 检查 `backend/`（当前 **0 报错**；`[tool.ruff]` 的 `src` 让本地模块按第一方排序） | 否 | 否 |
 | `pnpm build` | tsdown 编译 `src/cli` 两个入口 → `dist/`（`bin: verse`，带 shebang） | 否 | 否 |
 | `pnpm smoke` | vitest：渲染 / 流式 / 折叠 / 颜色 / 落盘（离线 mock） | 否 | 否 |
 | `pnpm sessions` | vitest：会话落盘 / 读回 / 重放 / 记录器（临时目录） | 否 | 否 |
@@ -41,7 +43,8 @@ Verse —— 用 Vue 3 + `@simon_he/vue-tui` 搭的**终端流式 agent TUI**，
 | `pnpm shot` | 把跑完的 buffer 渲成带色 HTML 出图 | 否 | 否 |
 | `node src/probes/<name>.ts` | 跑一次性探针（库行为/排版的实测现场） | 视探针 | 否 |
 
-改完东西的验收口径（本仓库一直按这个来）：**`pnpm typecheck` 0 错 + 受影响的套件全绿**。
+改完东西的验收口径（本仓库一直按这个来）：**`pnpm typecheck` 0 错 + 受影响的套件全绿**（后端改动还要
+`pnpm typecheck:backend` 与 `pnpm lint:backend` 0 错）。
 只碰文档时例外。后端改动至少跑 `pnpm config-test`；碰协议/会话/工具就跑 `pnpm rpc` + 对应 pytest。
 `rpc` / `model` / `test:backend` 的 agent 用例是**真调用模型端点**的，连跑会撞上游 RPM 限流
 （转写里出现 `[RPC 错误]`）——等一分钟单跑一次即可，不要误判成代码坏了，也不要为此改断言。

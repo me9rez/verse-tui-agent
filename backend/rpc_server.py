@@ -76,14 +76,17 @@ import logging
 import os
 import sys
 import traceback
-import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import websockets
+from agent_framework import (
+    FileHistoryProvider,
+    create_harness_agent,
+    get_agent_mode,
+    set_agent_mode,
+)
 from websockets.asyncio.server import serve
-
-from agent_framework import FileHistoryProvider, create_harness_agent, get_agent_mode, set_agent_mode
 
 from config import ConfigError, load_config, resolve_provider_key, sanitize
 
@@ -146,12 +149,18 @@ def _build_agent(model_ref: str):
     if not api_key:
         raise ConfigError(f"provider {pname!r} 没有 api_key（providers.{pname}.api_key 或其 env 子表）")
     if str(pdef.get("type", "openai")).lower() == "openai_responses":
-        from agent_framework.openai import OpenAIChatClient as ClientCls  # Responses API
+        from agent_framework.openai import (
+            OpenAIChatClient as ClientCls,  # Responses API
+        )
     else:
-        from agent_framework.openai import OpenAIChatCompletionClient as ClientCls  # Chat Completions
+        from agent_framework.openai import (
+            OpenAIChatCompletionClient as ClientCls,  # Chat Completions
+        )
     cli = ClientCls(model=raw, base_url=(pdef.get("base_url") or None), api_key=api_key)
     ag = create_harness_agent(
-        cli,
+        # 框架 harness 的注解只认 Responses 家族的 Options 协议，Chat Completions 客户端
+        # 运行时完全可用但静态判不兼容（Options 类型缺 include/prompt 等字段）——cast 收窄
+        cast(Any, cli),
         name="verse-agent",
         # 对话历史：每 session 一个 append-only JSONL，跨连接/跨进程恢复（load_messages=True）
         history_provider=FileHistoryProvider(HISTORY_DIR),
@@ -212,6 +221,9 @@ _SESSION_CACHE: dict[str, Any] = {}
 
 
 def _get_session(sid: str):
+    # 调用链保证 agent 已装配（handle_chat 先 _ensure_agent() 成功才会走到这里），
+    # assert 既安抚 pyright 的 Optional 推断，也让不变量被破坏时尽早暴露
+    assert agent is not None, "agent 未装配（_ensure_agent 应先成功）"
     sess = _SESSION_CACHE.get(sid)
     if sess is None:
         sess = agent.create_session(session_id=sid)
@@ -228,6 +240,7 @@ def _get_session(sid: str):
 async def _stream_turn(ws, session: str, prompt: str, send_lock) -> dict[str, Any]:
     """跑一轮 harness，把每个 AgentResponseUpdate 转成事件。返回 result 对象。"""
     sess = _get_session(session)
+    assert agent is not None, "agent 未装配（_ensure_agent 应先成功）"
 
     answer: list[str] = []
     usage: dict[str, Any] | None = None
@@ -271,7 +284,7 @@ async def _stream_turn(ws, session: str, prompt: str, send_lock) -> dict[str, An
             for cid, p in pending.items():
                 try:
                     params = json.loads(p["args"]) if p["args"] else {}
-                except Exception:
+                except (TypeError, ValueError):   # JSONDecodeError ⊂ ValueError；args 异常时按空参数继续
                     params = {}
                     log.warning("tool arguments 非法 call_id=%s", cid)
                 if not isinstance(params, dict):
@@ -352,7 +365,7 @@ async def handler(ws) -> None:
         async for raw in ws:
             try:
                 msg = json.loads(raw)
-            except Exception:
+            except Exception:  # noqa: BLE001 —— raw 是对端任意输入，任何解析异常都只回 -32700，不能杀收发循环
                 await _send(ws, send_lock, {"jsonrpc": "2.0", "id": None, "error": {
                     "code": -32700, "message": "Parse error"}})
                 continue
@@ -376,17 +389,21 @@ async def handler(ws) -> None:
             elif method == "agent/cancel":                  # 请求：应答 {cancelled}；被取消轮补发 -32001
                 sid = str(params.get("session") or "")
                 task = tasks.get(sid)
-                cancelled = bool(task and not task.done())
-                if cancelled:
+                if task is not None and not task.done():
                     task.cancel()
                     log.info("已取消会话 %s 的轮次", sid)
+                    cancelled = True
+                else:
+                    cancelled = False
                 if rid is not None:
                     await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid,
                                                 "result": {"cancelled": cancelled}})
             elif method == "agent/reset":                   # 清掉该会话的服务端内存状态
                 sid = str(params.get("session") or "")
-                if agent is not None and sid in agent._sessions:
-                    agent._sessions.pop(sid, None)
+                # _sessions 是框架 Agent 未公开的映射，getattr 兜住未来改名（拿不到就当无会话可清）
+                sessions = getattr(agent, "_sessions", None)
+                if sessions is not None and sid in sessions:
+                    sessions.pop(sid, None)
                 _SESSION_CACHE.pop(sid, None)
                 if rid is not None:
                     await _send(ws, send_lock, {"jsonrpc": "2.0", "id": rid,

@@ -1,5 +1,9 @@
 """聚焦复现：发一轮长任务，1.5s 后 cancel，打印此后收到的每一条消息。"""
-import asyncio, json, websockets
+import asyncio
+import json
+
+import websockets
+
 
 async def main():
     async with websockets.connect("ws://127.0.0.1:8765") as ws:

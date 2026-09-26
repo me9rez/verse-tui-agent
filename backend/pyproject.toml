@@ -13,9 +13,22 @@ package = false
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.414",
     "pytest>=9.1.1",
+    "ruff>=0.16.9",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]     # 非包项目：让 tests 里能 import config / rpc_server / rpc_helpers
+
+# extraPaths 对齐 pytest 的 pythonpath：tests 直接 import 顶层模块（conftest 同款约定）
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+extraPaths = ["."]
+
+# src 让 config / conftest / rpc_helpers 识别为第一方（stdlib → 三方 → 本地 的排序才正确）
+[tool.ruff]
+src = [".", "tests"]

@@ -29,6 +29,8 @@
     "config-test": "cd backend && uv run pytest tests/test_config.py -q",
     "test:backend": "cd backend && uv run pytest -q",
     "typecheck": "tsc -p tsconfig.json",
+    "typecheck:backend": "cd backend && uv run pyright",
+    "lint:backend": "cd backend && uv run ruff check .",
     "sessions": "vitest run test/session.test.ts"
   },
   "license": "MIT",
