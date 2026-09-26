@@ -27,6 +27,8 @@ export type StoredTurn = {
   aborted?: boolean
   /** AgentSession.snapshot() 的结果（仅 ai 路有内容） */
   agentState?: unknown
+  /** LLM 终态返回的真实用量（rpc 轮次）：恢复会话时状态栏回填最近一轮 */
+  usage?: Record<string, number>
 }
 
 export type SessionKind = 'mock' | 'rpc'

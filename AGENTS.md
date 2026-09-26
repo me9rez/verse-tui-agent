@@ -40,6 +40,7 @@ Verse —— 用 Vue 3 + `@simon_he/vue-tui` 搭的**终端流式 agent TUI**，
 | `pnpm open` | vitest：`/open` 会话选择器（离线 mock + 临时会话目录） | 否 | 否 |
 | `pnpm effort` | vitest：`/effort` 思考强度命令（离线 mock） | 否 | 否 |
 | `pnpm image` | vitest：Alt+V 剪贴板贴图（离线 mock + 能力门控） | 否 | 否 |
+| `pnpm hotkeys` | vitest：Alt+M/Alt+E 快捷键 + 状态栏 usage 格式化（离线） | 否 | 否 |
 | `pnpm test:backend` | pytest 全量（protocol + agent + switch，agent/switch 打真模型） | 自拉或复用 8765 | 否 |
 | `pnpm test` | vitest 全量（含 rpc / model，**必须先起后端**） | **是** | 否 |
 | `pnpm shot` | 把跑完的 buffer 渲成带色 HTML 出图 | 否 | 否 |

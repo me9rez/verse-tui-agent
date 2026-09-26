@@ -20,6 +20,7 @@
 import type { AgentSession, RawImage, ThinkingInfo, ToolStep, TurnContext } from './seam.ts'
 import { setBackendModel } from './model.ts'
 import { setBackendMode } from './mode.ts'
+import { setBackendUsage } from './usage.ts'
 import { DEFAULT_RPC_URL, setBoot, type VerseBoot } from '../core/config.ts'
 
 export type RpcOptions = {
@@ -255,7 +256,9 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
       }, 80)
 
       try {
-        await done
+        // 终态 result.usage = LLM 返回的真实用量（含缓存命中）→ 状态栏；取消轮 reject 不回填
+        const result = (await done) as { usage?: Record<string, number> } | null
+        setBackendUsage(result?.usage ?? null)
       } catch (err) {
         const code = (err as { code?: number }).code
         // -32001 = 我们自己发的 cancel，正常中止，不往转写里写错误

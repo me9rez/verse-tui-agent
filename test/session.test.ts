@@ -95,6 +95,7 @@ section('读写', () => {
           { name: 'read_file', arg: 'a.ts', params: { path: 'a.ts', offset: 1 }, status: 'ok', out: ['1| const a = 1'] },
         ],
         answer: ['答案一'],
+        usage: { input_token_count: 12345, output_token_count: 678, total_token_count: 13023, cache_read_input_token_count: 8123 },
       },
     ],
   })
@@ -107,6 +108,11 @@ section('读写', () => {
     '读回来与写进去一致（含嵌套 params 与工具输出）',
     JSON.stringify(back) === JSON.stringify(one),
     back ? `turns=${back.turns.length} tools=${back.turns[0]?.tools.length}` : '读回 null',
+  )
+  check(
+    'usage 随轮持久化（恢复会话状态栏的数据源）',
+    back?.turns[0]?.usage?.input_token_count === 12345 && back.turns[0].usage?.cache_read_input_token_count === 8123,
+    JSON.stringify(back?.turns[0]?.usage),
   )
 
   // 再写一个更新的会话 + 一个坏文件，验证排序与容错

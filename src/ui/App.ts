@@ -29,6 +29,8 @@ import { createMockSession } from '../session/mock.ts'
 import { createRpcSession } from '../session/rpc.ts'
 import { getBackendModel, onBackendModel } from '../session/model.ts'
 import { onBackendMode } from '../session/mode.ts'
+import { getBackendUsage, onBackendUsage, setBackendUsage } from '../session/usage.ts'
+import { cacheText, ctxText, fmtK, readUsage } from './usage.ts'
 import type { AgentSession, RawImage } from '../session/seam.ts'
 import { DEFAULT_RPC_URL, effectiveConfig, getBoot } from '../core/config.ts'
 import { styles } from '../core/theme.ts'
@@ -136,6 +138,19 @@ export const App = defineComponent({
     const harnessMode = ref('')
     onBackendMode((m) => {
       harnessMode.value = m
+    })
+
+    /** 上一轮 LLM 真实 usage（agent/chat 终态 result.usage 回填）：状态栏 ctx/cache 段数据源 */
+    const backendUsage = ref<Record<string, number> | null>(null)
+    onBackendUsage((u) => {
+      backendUsage.value = u
+    })
+    const usageView = computed(() => readUsage(backendUsage.value))
+    /** 当前模型上下文窗口（config/get 下发的 max_context_size）：ctx 百分比的分母；没配 = 0。 */
+    const maxCtx = computed<number>(() => {
+      const alias = backendModel.value || effectiveConfig().default_model
+      const m = effectiveConfig().models.find((one) => one.alias === alias)
+      return m?.max_context_size || 0
     })
 
     /** Shift+Tab：plan ↔ execute。切换目标取自后端回填的当前值（没握手过按默认 plan）。 */
@@ -248,8 +263,16 @@ export const App = defineComponent({
         store.addNote(`切换失败：${err instanceof Error ? err.message : String(err)}`)
       }
     }
-    /** 打开选择器：thinking/get 取当前档位与支持表（模型没配就回默认档位表 + off 尾项）。 */
+    /** 打开思考强度选择器：/effort 无参与 Alt+E 共用（守卫同 applyEffortSwitch 的前置检查）。 */
     async function openEffortPicker(): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote('当前是 mock 剧本，没有思考档位；/rpc 切到后端后再用 /effort <档位>。')
+        return
+      }
+      if (ui.streaming) {
+        store.addNote('⚠ 本轮还在跑，等结束再切换思考档位。')
+        return
+      }
       try {
         const info = await sessionRef.value.getThinking?.()
         if (!info) {
@@ -266,7 +289,7 @@ export const App = defineComponent({
           keywords: [lv],
         }))
         effortSelIdx.value = Math.max(0, levels.indexOf(info.effort))
-        modelPickerOpen.value = false // 两个选择器互斥，别叠开
+        modelPickerOpen.value = false // 三个选择器互斥，别叠开
         sessionPickerOpen.value = false
         effortPickerOpen.value = true
       } catch (err) {
@@ -302,6 +325,22 @@ export const App = defineComponent({
       pendingImage.value = { data: img.data, bytes: img.bytes }
       const kb = Math.max(1, Math.round(img.bytes / 1024))
       store.addNote(imageSupported.value ? imageNoteReady(kb) : imageNoteDegraded(kb))
+    }
+
+    /** 打开模型选择器：/model 无参与 Alt+M 共用（守卫同 applyModelSwitch 的前置检查）。 */
+    async function openModelPicker(): Promise<void> {
+      if (sessionRef.value.kind !== 'rpc') {
+        store.addNote(`当前模型：${displayModel.value}（mock 剧本无模型）`)
+      } else if (ui.streaming) {
+        store.addNote('⚠ 本轮还在跑，等结束再切换模型。')
+      } else if (!modelItems.value.length) {
+        store.addNote(`当前模型：${displayModel.value}（config.toml [models] 为空，可用 /model <id> 直切）`)
+      } else {
+        modelSelIdx.value = currentModelIndex()
+        sessionPickerOpen.value = false // 三个选择器互斥，别叠开
+        effortPickerOpen.value = false
+        modelPickerOpen.value = true
+      }
     }
 
     /** /open 会话选择器：开关 + 受控高亮 + 条目。
@@ -346,6 +385,15 @@ export const App = defineComponent({
       replaySession(target, store)
       sessionRef.value.restore?.(target.turns.at(-1)?.agentState)
       turn.value = target.turns.length
+      // 回填最近一轮的真实 usage（会话文件持久化）；没有就清空，状态栏退回本地估算
+      let usage: Record<string, number> | null = null
+      for (let i = target.turns.length - 1; i >= 0; i--) {
+        if (target.turns[i].usage) {
+          usage = target.turns[i].usage ?? null
+          break
+        }
+      }
+      setBackendUsage(usage)
       scheduler.invalidate()
     }
 
@@ -417,6 +465,9 @@ export const App = defineComponent({
         {
           onTurnEnd(turnRec) {
             if (!persist) return
+            // 真实 usage 随轮落盘（取消轮没有新 usage，不挂），恢复会话时状态栏才有数据
+            const usage = getBackendUsage()
+            if (usage && !turnRec.aborted) turnRec.usage = usage
             const session = current.session ?? startSession(sessionRef.value.kind)
             session.turns.push(turnRec)
             session.updatedAt = new Date().toISOString()
@@ -536,6 +587,7 @@ export const App = defineComponent({
           } else {
             startSession(sessionRef.value.kind, wanted || '新会话')
             sessionRef.value = makeSession(sessionRef.value.kind)
+            setBackendUsage(null) // 新会话还没有轮次
             store.clear()
             turn.value = 0
             store.addNote(`已新建会话 ${current.session?.id ?? ''}${wanted ? ` · ${wanted}` : ''}`)
@@ -547,9 +599,11 @@ export const App = defineComponent({
         } else if (cmd === '/exit') props.onExit?.()
         else if (cmd === '/mock') {
           sessionRef.value = createMockSession()
+          setBackendUsage(null) // mock 没有真实 usage，别显示上一个会话的
           store.addNote('已切回本地剧本。')
         } else if (cmd === '/rpc') {
           sessionRef.value = makeSession('rpc')
+          setBackendUsage(null) // 新会话还没有轮次
           const g = effectiveConfig().gateway
           store.addNote(
             `已切到远端 harness 后端：ws://${g.host}:${g.port}（历史在服务端落盘）`,
@@ -560,32 +614,14 @@ export const App = defineComponent({
         } else if (cmd === '/model' || cmd.startsWith('/model ')) {
           const arg = raw.trim().slice(6).trim()
           if (!arg) {
-            // 无参 = 弹模型选择器（rpc 且 [models] 非空才弹；否则回退提示）
-            if (sessionRef.value.kind !== 'rpc') {
-              store.addNote(`当前模型：${displayModel.value}（mock 剧本无模型）`)
-            } else if (ui.streaming) {
-              store.addNote('⚠ 本轮还在跑，等结束再切换模型。')
-            } else if (!modelItems.value.length) {
-              store.addNote(`当前模型：${displayModel.value}（config.toml [models] 为空，可用 /model <id> 直切）`)
-            } else {
-              modelSelIdx.value = currentModelIndex()
-              sessionPickerOpen.value = false // 两个选择器互斥，别叠开
-              modelPickerOpen.value = true
-            }
+            await openModelPicker() // 无参 = 弹模型选择器（守卫在函数内）
           } else {
             await applyModelSwitch(arg)
           }
         } else if (cmd === '/effort' || cmd.startsWith('/effort ')) {
           const arg = raw.trim().slice(7).trim()
           if (!arg) {
-            // 无参 = 弹思考强度选择器（rpc 才有档位可切；否则回退提示）
-            if (sessionRef.value.kind !== 'rpc') {
-              store.addNote(`当前是 mock 剧本，没有思考档位；/rpc 切到后端后再用 /effort <档位>。`)
-            } else if (ui.streaming) {
-              store.addNote('⚠ 本轮还在跑，等结束再切换思考档位。')
-            } else {
-              await openEffortPicker()
-            }
+            await openEffortPicker() // 无参 = 弹思考强度选择器（守卫在函数内）
           } else {
             await applyEffortSwitch(arg)
           }
@@ -634,6 +670,17 @@ export const App = defineComponent({
       if (event.altKey && (event.key === 'v' || event.key === 'V')) {
         event.preventDefault()
         void pasteImageFromClipboard()
+        return
+      }
+      // Alt+M 切模型 / Alt+E 切思考强度：与 /model、/effort 无参路径完全同一条代码
+      if (event.altKey && (event.key === 'm' || event.key === 'M')) {
+        event.preventDefault()
+        void openModelPicker()
+        return
+      }
+      if (event.altKey && (event.key === 'e' || event.key === 'E')) {
+        event.preventDefault()
+        void openEffortPicker()
         return
       }
       if (event.key === 'Escape' && ui.streaming) {
@@ -686,9 +733,19 @@ export const App = defineComponent({
     const statusSegs = computed(() => {
       const cols = size.value.cols
       const stats = { ...store.stats.value, tokens: store.estimateTokens() }
+      // 有真实 usage（rpc 跑过至少一轮）显示 LLM 返回的用量与缓存命中；否则退回本地估算
+      const uv = usageView.value
+      const usageSegs: string[] = uv
+        ? [
+            `in ${fmtK(uv.input)}`,
+            `out ${fmtK(uv.output)}`,
+            ctxText(uv, maxCtx.value),
+            cacheText(uv),
+          ].filter((s): s is string => !!s)
+        : [`${stats.tokens} tok`]
       const right = [
         sessionRef.value.label,
-        `${stats.tokens} tok`,
+        ...usageSegs,
         `${stats.tools} tools`,
         ui.streaming ? formatDuration(ui.elapsedMs) : '',
       ]

@@ -25,6 +25,7 @@
     "open": "vitest run test/open.test.ts",
     "effort": "vitest run test/effort.test.ts",
     "image": "vitest run test/image.test.ts",
+    "hotkeys": "vitest run test/hotkeys.test.ts",
     "complete": "vitest run test/complete.test.ts",
     "build": "tsdown",
     "backend": "cd backend && uv run python rpc_server.py",
