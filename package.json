@@ -3,6 +3,14 @@
   "version": "0.0.1",
   "private": true,
   "description": "Verse",
+  "homepage": "https://github.com/me9rez/verse-tui-agent#readme",
+  "bugs": {
+    "url": "https://github.com/me9rez/verse-tui-agent/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/me9rez/verse-tui-agent.git"
+  },
   "type": "module",
   "bin": {
     "verse": "dist/terminal.mjs"
