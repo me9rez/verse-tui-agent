@@ -44,7 +44,7 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 |---|---|
 | `pnpm dev` | 交互式 TUI（需要真实 TTY；无 TTY 会直接提示去跑 `pnpm smoke`） |
 | `pnpm test` | vitest 全量：smoke + sessions + complete + rpc 四文件（rpc 需 `pnpm backend`） |
-| `pnpm smoke` | vitest：渲染 / 流式 / 折叠 / 颜色 / 落盘 27 项软断言（离线，不需要 key） |
+| `pnpm smoke` | vitest：渲染 / 流式 / 折叠 / 颜色 / 落盘 / 两列版面 34 项软断言（离线，不需要 key） |
 | `pnpm complete` | vitest：slash 命令补全的按键链路 5 项（离线 mock） |
 | `pnpm rpc` | vitest：WebSocket JSON-RPC 后端 8 项（需先起 `pnpm backend`） |
 | `pnpm model` | vitest：`/model` 模型选择器 5 项（弹出/↑↓切换/Esc 取消/文本直切/mock 守卫，需后端） |
@@ -106,7 +106,7 @@ tui  agent=rpc speed=1 persist=true · session_dir=…
 | **点标题** | 鼠标点分组标题也能折叠 / 展开（库画 ▸/▾ 并带命中区） |
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
 | **输入 `/`** | **命令自动补全**：↑↓ 选择 · Enter/Tab 采用（再按 Enter 发送）· 模糊匹配、与 `/help` 同一张命令表 |
-| **Shift+Tab** | **切 harness 模式 plan ↔ execute**（仅 rpc；状态栏独立模式段显示当前值，plan 高亮；mock 提示不支持） |
+| **Shift+Tab** | **切 harness 模式 plan ↔ execute**（仅 rpc；当前模式在右列 `模式` 区与状态栏模式段常驻显示，plan 高亮；**切换不再往转写写通知**——写进转写会刷屏，mock 提示不支持） |
 | 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model [<id>]`（无参弹模型选择器，带 id 直切） `/effort [<档位>]`（无参弹思考强度选择器：low/medium/high/xhigh/max/off，带档位直切） `/exit` |
 | 会话 | `/sessions` 列表（▶ = 当前）· `/open [序号\|id]`（无参弹选择器）切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
@@ -237,8 +237,9 @@ src/
                            useTurnRuntime / useHarnessMode / useModelControl / useEffortControl /
                            useImageAttachment / useStatusBar / useSlashCommands / useComposer /
                            useKeyboardControls
-    components/            渲染子组件：WelcomeBlock / TranscriptPane / StatusStrip / DividerBar /
-                           ComposerRow / CommandPicker / PickerStack（三个选择器收一处装配）
+    components/            渲染子组件：WelcomeBlock / TranscriptPane / TipsColumn（右列竖线 + tips）/
+                           StatusStrip / DividerBar / ComposerRow / CommandPicker /
+                           PickerStack（三个选择器收一处装配）
   session/               会话域（接缝 + 实现 + 落盘，一个概念一个目录）
     seam.ts                接缝类型（AgentSession / StreamStep / ToolStep / TurnSink）
     mock.ts                本地剧本（工具步骤真的起子进程）
@@ -263,13 +264,14 @@ src/
 会话层(本地剧本 / RPC 后端)  ──delta──▶  TranscriptStore  ──version──▶  TTranscriptView  ──只重绘脏行──▶  终端 buffer
 ```
 
-版面按 plane 分区（库的 `TRenderPlane`）：transcript（空态欢迎块 / 正文，每 10~20ms 一次）、chrome（状态栏与分割线，每 100ms 一次）、**overlay（输入行 + 补全弹窗**，只在按键时）——正文刷 30 行也不会让输入框光标闪一下，补全弹窗必须在 overlay 平面（见「踩过的坑」）。
+版面按 plane 分区（库的 `TRenderPlane`）：transcript（空态欢迎块 / 正文，每 10~20ms 一次）、chrome（状态栏、两条分割线与右列 Tips/快捷键，每 100ms 一次）、**overlay（输入行 + 补全弹窗**，只在按键时）——正文刷 30 行也不会让输入框光标闪一下，补全弹窗必须在 overlay 平面（见「踩过的坑」）。
 
 ### 空态与输入行（step 风格）
 
-- **欢迎块**（仅空态）：`v0.1.0` 边框标题 + 紫色像素 V logo + `model`/`cwd` 信息列 + `Tips`（三条命令，desc 与 `/help` 同源于 `COMMANDS`）；下面一行空态提示，再往下是留白。`model` 显示后端握手 `initialize.result.model` 的权威值（rpc 会话创建即连后端回填；`/model` 选择器或 `/model <id>` 切换后跟随更新），不是环境变量。
-- **输入行**：`>` 前缀（accent 色）+ 无边框 `TInput` + 占位符 `问点什么（/ 补全命令 · Enter 发送 · Esc 中断）`，上方一条 `─` 分割线；输入 `/` 弹补全（弹窗画在输入行上方的 overlay 栈）。
-- **状态栏**（底行，多段拼色）：`✻ ready · 模式 · harness 模式 · 模型 · cwd`（左）+ `会话 · in/out · ctx 占用 · cache 命中 · N tools`（右）。跑过 rpc 轮次后，右段显示 LLM 终态返回的真实 usage：`in 12.3k out 678`、`ctx 12.3k/200k 6%`（input / 当前模型 `max_context_size`，没配窗口只显示绝对值）、`cache 8.1k 66%`（端点缓存命中 token 与命中率，端点没回缓存信息就不显示）；usage 随轮次持久化在会话文件里，重进会话 / `/open` 切回自动回填最近一轮（`/new` `/mock` `/rpc` 切走即清空）；没跑过轮次退回本地 token 估算。窄终端按**信息优先级**丢段，永不换行溢出：左段（phase · 模式 · harness 模式 · 模型 · cwd）与右段（会话 · in/out · ctx 占用 · cache 命中 · N tools · 耗时）一起参与裁切，先丢 cwd、cache 命中、耗时、ctx 占用，再丢 in/out，然后才是模型名与 tools；phase 与 harness 模式段是保底（100 列下实测留住 `✻ ready · rpc · plan · workbuddy/hy3` + `rpc · 127.0.0.1:8765 · in 3.8k · out 841 · 0 tools`）。`模型` 段与欢迎块同源（`displayModel` = 握手回填的后端 model id）。
+- **两列布局**：终端宽度 ≥ `layout.ts` 的 `TWO_COL_MIN`（90 列）时，转写区右侧多出一列 **Tips**（整块 `TIPS_COLS` = 34 列：竖线 `│` + **`模式` 区**（当前档 + 一行短说明，随 Shift+Tab 实时变，配色与状态栏 harness 段同源）+ `Tips` 三条命令 + `快捷键` 四条），竖线是左列的右边界、整列用**一个多行 `TText`** 画（库没有竖向 divider，见「踩过的坑」）；不足 90 列时右列整块不渲染，转写占满整宽。命令文案与 `/help` 同源（`COMMANDS`，右列用 `short` 短描述，没写则回落 `desc`），快捷键表是 `texts.ts` 的 `KEY_HINTS`、模式短说明是 `MODE_HINT`。**输入行、两条分割线与状态栏始终全宽**，不参与分栏。
+- **欢迎块**（仅空态，画在左列里）：`v0.1.0` 边框标题 + 紫色像素 V logo + `model`/`cwd` 信息列；下面一行空态提示，再往下是留白（命令 Tips 归右列，这里不再重复一份）。`model` 显示后端握手 `initialize.result.model` 的权威值（rpc 会话创建即连后端回填；`/model` 选择器或 `/model <id>` 切换后跟随更新），不是环境变量。
+- **输入行**：`>` 前缀（accent 色）+ 无边框 `TInput` + 占位符 `问点什么（/ 补全命令 · Enter 发送 · Esc 中断）`，上下各一条 `─` 分割线（把输入行与转写区、状态栏分开）；输入 `/` 弹补全（弹窗画在输入行上方的 overlay 栈）。
+- **状态栏**（底行，多段拼色）：`✻ ready · harness 模式 · 思考强度 · 模型 · cwd`（左）+ `会话（rpc/mock + 地址）· in/out · ctx 占用 · cache 命中 · N tools`（右）。左段只放「当前模型 + 后端行为态」，右段放「连的是谁 + 用量」——模式不在左段重复出现（右段会话 label 已带 `rpc · 127.0.0.1:8765` / `mock 剧本`）。跑过 rpc 轮次后，右段显示 LLM 终态返回的真实 usage：`in 12.3k out 678`、`ctx 12.3k/200k 6%`（input / 当前模型 `max_context_size`，没配窗口只显示绝对值）、`cache 8.1k 66%`（端点缓存命中 token 与命中率，端点没回缓存信息就不显示）；usage 随轮次持久化在会话文件里，重进会话 / `/open` 切回自动回填最近一轮（`/new` `/mock` `/rpc` 切走即清空）；`思考强度` 段显示 `thinking/get` 回填的当前档位（形如 `effort high`，仅 rpc 且后端有值时显示；握手、切模型、切会话后自动刷新一次，`/effort`、Alt+E 切档后立即跟随）。没跑过轮次退回本地 token 估算。窄终端按**信息优先级**丢段，永不换行溢出：左段（phase · harness 模式 · 思考强度 · 模型 · cwd）与右段（会话 · in/out · ctx 占用 · cache 命中 · N tools · 耗时）一起参与裁切，先丢 cwd、cache 命中、耗时、ctx 占用，再丢 in/out，然后才是模型名、tools 与思考强度；phase 与 harness 模式段是保底（100 列实测：`✻ ready · plan · effort high · workbuddy/hy3` + `rpc · 127.0.0.1:8765 · in 3.8k · out 273 · 0 tools`；更窄时先丢 cwd 与 usage 细节，模型名、harness 模式、思考强度优先保住）。`模型` 段与欢迎块同源（`displayModel` = 握手回填的后端 model id）。
 
 ## 唯一后端：Agent Framework（WebSocket + JSON-RPC 2.0）
 
@@ -375,7 +377,7 @@ Alt+V 贴的图片经历史 provider 以 data URI 随会话 JSONL 明文落盘�
 
 | 命令 | 覆盖 | 断言数 |
 |---|---|---|
-| `pnpm smoke` | mock 剧本的渲染链路（vitest） | 27 软断言 |
+| `pnpm smoke` | mock 剧本的渲染链路 + 两列版面与窄终端降级（vitest） | 34 软断言 |
 | `pnpm rpc` | WebSocket JSON-RPC 后端的流式链路（vitest，需 `pnpm backend` 在跑） | 8 |
 | `pnpm complete` | slash 命令补全的按键注入链路（vitest，离线 mock） | 5 |
 | `pnpm effort` | `/effort` 思考强度：补全 / mock 守卫 / 选择器回退 / HELP 派生（vitest，离线 mock） | 5 |
@@ -427,6 +429,8 @@ Alt+V 贴的图片经历史 provider 以 data URI 随会话 JSONL 明文落盘�
 - **`TInputBox` 提交后不会自己清空**：把 `modelValue` 置空不生效（组件内部持有文本，也没 expose `clear()`），做法是提交后自增 `key` 强制重建输入框。这个坑是往 PTY 里连发两次 `/env` 才暴露的 —— 第二次提交的文本实际是 `/env/env`，掉进了「未知命令」分支。顺带加了控制字符清洗和 `debug_input`（`tui.toml` 或 `--debug-input`，把**原始提交文本按 JSON** 记进 `.artifacts/input-debug.log`）。
 - **TBox 的内容必须做成 children**：欢迎块第一版把 logo/Tips 画成 TBox 的兄弟节点，结果整块内容被盒体自身的填充覆盖得只剩边框——TBox 的绘制发生在子树之后，兄弟节点必输。
 - **TInput 的占位符要 `placeholderWhenFocused`**：默认 false，autoFocus 的输入框（我们恒定聚焦）永远不显示 placeholder；设 true 才有 step 那种常驻提示。
+- **竖线的列号不能用字符串下标算**：`│` 和中文一样是「1 个字符」，但中文占 2 个单元格——用 `line.indexOf('│')` 当列号，**中文行**会算出错的列。开发两列布局时正是据此误判「竖线只上屏 11 行」（实际 28 行全在，只是被算错）。凡按列号做的判断与断言，都要用 `cellWidth()` 累加（`test/smoke.test.ts` 的 `barCol()` 就是）。
+- **库没有竖向 divider**：`TDivider` 只画横线（props 只有 x/y/w/title），`TBox` 的 `border` 只能整圈开（没有单边选项）。右列那条分隔竖线用「一个含换行的多行 `TText`」（`h` + `\n`）画：1 个节点顶 28 个单格节点，也避开库对同型节点的依赖跟踪（见 `TText` 的 `depsKey` 注释）。
 - **`/` 补全弹窗必须包在 `TRenderPlane plane="overlay"` 里**：弹窗是 prompt 插件画在 zIndex=1e4 独立栈上的；挂在 root 或 `'default'` 平面时，逐帧合并会吃掉内容行——实测框和最后一行在、前 6 行全空，flush 流里连 detail 都缺。挪进 `overlay` 平面后全部行稳定渲染（`pnpm complete` 4 项断言守着）。同一次实测还确认：`TInputBox` 不透传 `prompt*` props（types + 源码双验证），补全必须自己用 `TBox + TInput` 组合，`prompt*` 直接给 `TInput`。
 - **Node 的类型剥离模式不支持构造函数参数属性**（`constructor(private x: T)` → `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`）。
 

@@ -4,8 +4,9 @@
  * 条目在打开瞬间从 thinking/get 构建存 ref（异步取数无响应式依赖，用 computed 会把首帧空值缓存住）；
  * 每次 cycle 也重新取实时值，切模型后不会用过期档位。
  */
-import { ref, type Ref } from 'vue'
+import { ref, watch, type Ref } from 'vue'
 import type { TCommandPaletteItem } from '@simon_he/vue-tui'
+import { onBackendModel } from '../../session/model.ts'
 import type { TranscriptStore } from '../../transcript/index.ts'
 import type { SessionController } from './useSessionController.ts'
 import type { TurnUi } from './useTurnRuntime.ts'
@@ -119,6 +120,33 @@ export function useEffortControl(deps: {
       store.addNote(`切换思考档位失败：${err instanceof Error ? err.message : String(err)}`)
     }
   }
+
+  /**
+   * 状态栏「思考强度」段的数据源：握手 / 切模型 / 切会话后主动取一次 thinking/get 回填。
+   * 不在这些时刻取的话，effort 只会在用户打开过 /effort 或按过 Alt+E 之后才有值。
+   * 取不到（mock / 旧后端 / 模型没配档位）就保持空串 —— 状态栏不显示该段。
+   */
+  async function syncFromBackend(): Promise<void> {
+    if (session.sessionRef.value.kind !== 'rpc') {
+      effort.value = ''
+      return
+    }
+    try {
+      const info = await session.sessionRef.value.getThinking?.()
+      effort.value = info?.effort ?? ''
+    } catch {
+      effort.value = ''
+    }
+  }
+
+  // 握手回填 model 说明连接可用（model/set 成功后也走这条），此刻取实时档位
+  onBackendModel(() => void syncFromBackend())
+  // /mock 切回、/open 换会话、重连：会话对象换了就重新同步（mock 走上面的清空分支）
+  watch(
+    () => `${session.sessionRef.value.kind}:${session.sessionRef.value.id}`,
+    () => void syncFromBackend(),
+    { immediate: true },
+  )
 
   return { effort, items, pickerOpen, selIdx, openPicker, cycle, applySwitch }
 }

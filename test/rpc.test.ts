@@ -137,6 +137,13 @@ test('rpc 端到端：流式 / buffer / 错误字样 / markdown / model 回填',
     Boolean(modeSeg),
     modeSeg ? `模式段可见：${modeSeg[0]}` : '状态栏里没找到 · plan/execute ·',
   )
+  // 同一份模式信息也常驻右列「模式」区（右列窄，用短说明；见 texts.ts 的 MODE_HINT）
+  const modeHint = screenAll.match(/(只规划，等批准|自主执行)/)
+  check(
+    '右列模式区显示当前模式说明',
+    Boolean(modeHint),
+    modeHint ? `右列模式说明：${modeHint[0]}` : '右列里没找到模式短说明',
+  )
 
   report = {
     url: RPC_URL,

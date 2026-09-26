@@ -16,6 +16,10 @@ export const TranscriptPane = defineComponent({
   name: 'TranscriptPane',
   props: {
     store: { type: Object as PropType<TranscriptStore>, required: true },
+    /**
+     * 左列可用宽度（layout.ts 的 transcriptW）：两列时是竖线左边的宽度，单列时等于终端宽。
+     * 空态欢迎块与正文 view 都用它，所以右列变宽时这里自动收窄。
+     */
     cols: { type: Number, required: true },
     /** 转写区起点与高度（layout.ts 的 transcriptY / transcriptH） */
     y: { type: Number, required: true },

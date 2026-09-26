@@ -7,7 +7,7 @@
  *  2. 提交后用 key 换一个新实例才是真正的"清空输入框"（否则下次输入会拼在旧文本后面），key 随 composerKey 变化。
  *
  * 坐标与宽度都是绝对单元格：有待发图片时输入框收窄，右端让位给指示条
- * （divider 紧贴输入行上方，没有第二行可用）。
+ * （输入行上下紧贴两条 divider，没有第二行可用）。
  */
 import { defineComponent, h, type PropType } from 'vue'
 import { TText } from '@simon_he/vue-tui'

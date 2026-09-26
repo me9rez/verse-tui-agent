@@ -123,15 +123,14 @@ test('Alt+M / Alt+E 路由与 usage 格式化', { timeout: 300_000 }, async () =
   type Seg = { text: string; dropPrio?: number }
   const leftSegs = (): Seg[] => [
     { text: '✻ ready' }, // phase：不标优先级 = 保底，永不丢
-    { text: 'rpc', dropPrio: 11 },
-    { text: 'plan', dropPrio: 9 },
+    { text: 'plan', dropPrio: 10 },
+    { text: 'effort high', dropPrio: 9 },
     { text: 'workbuddy/hy3', dropPrio: 7 },
     { text: 'D:\\workspace\\verse-tui-agent', dropPrio: 1 },
   ]
   const rightSegs = (): Seg[] => [
-    { text: 'rpc · 127.0.0.1:8765', dropPrio: 10 },
-    { text: 'in 3.8k', dropPrio: 6 },
-    { text: 'out 813', dropPrio: 6 },
+    { text: 'rpc · 127.0.0.1:8765', dropPrio: 11 },
+    { text: 'in 3.8k · out 813', dropPrio: 6 },
     { text: 'ctx 3.8k/192k 2%', dropPrio: 4 },
     { text: '0 tools', dropPrio: 8 },
   ]
@@ -153,7 +152,7 @@ test('Alt+M / Alt+E 路由与 usage 格式化', { timeout: 300_000 }, async () =
   const wideL = leftSegs()
   const wideR = rightSegs()
   fitStatus(wideL, wideR, 200)
-  check('宽屏不动任何段', wideL.length === 5 && wideR.length === 5, `${wideL.length}/${wideR.length}`)
+  check('宽屏不动任何段', wideL.length === 5 && wideR.length === 4, `${wideL.length}/${wideR.length}`)
 
   lastScreen = screen()
 })

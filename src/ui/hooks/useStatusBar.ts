@@ -42,9 +42,10 @@ const PRIO = {
   inOut: 6,
   model: 7,
   tools: 8,
-  harness: 9,
-  label: 10,
-  mode: 11,
+  /** 思考强度：与 harness 模式同属「后端行为态」，比模型名后丢、比 harness 先丢 */
+  effort: 9,
+  harness: 10,
+  label: 11,
 } as const
 
 /** 带裁切优先级的段 */
@@ -95,9 +96,13 @@ export function useStatusBar(deps: {
   usageView: ComputedRef<UsageView | null>
   maxCtx: ComputedRef<number>
   harnessMode: Ref<string>
+  /** 当前思考档位（effort 域提供）；空 = 后端未设置/不发光标参数，该段不显示 */
+  effort: Ref<string>
   cols: ComputedRef<number>
 }): StatusBar {
-  const { store, session, ui, phaseText, displayModel, usageView, maxCtx, harnessMode, cols } = deps
+  const {
+    store, session, ui, phaseText, displayModel, usageView, maxCtx, harnessMode, effort, cols,
+  } = deps
 
   const segs = computed(() => {
     const stats = { ...store.stats.value, tokens: store.estimateTokens() }
@@ -106,12 +111,13 @@ export function useStatusBar(deps: {
     const mode = session.sessionRef.value.kind === 'rpc' ? 'rpc' : 'mock'
 
     // 左段（项序 = 显示序）
+    // 模式（rpc/mock）不在左段显示：右段会话 label 已经带它（`rpc · 127.0.0.1:8765` / `mock 剧本`），
+    // 两处都写会重复占宽。左段只留「当前模型 + 后端行为态」，右段留给「连的是谁 + 用量」。
     const left: DropSegment[] = [
       {
         text: `${phaseText.value}${ui.streaming ? '  (Esc 中断)' : ''}`,
         style: ui.streaming ? styles.statusActive : styles.statusOk,
       },
-      { text: mode, style: styles.tipCmd, dropPrio: PRIO.mode },
       // harness 模式段（仅 rpc）：plan 高亮提醒「只规划不动手」，execute 用普通蓝
       ...(mode === 'rpc' && harnessMode.value
         ? [
@@ -122,6 +128,10 @@ export function useStatusBar(deps: {
             },
           ]
         : []),
+      // 思考强度段（仅 rpc 且后端有值）：文案与 /effort 同源，切档后立即跟随
+      ...(mode === 'rpc' && effort.value
+        ? [{ text: `effort ${effort.value}`, style: styles.tipCmd, dropPrio: PRIO.effort }]
+        : []),
       { text: displayModel.value, style: styles.infoValue, dropPrio: PRIO.model },
       { text: process.cwd(), style: styles.faint, dropPrio: PRIO.cwd },
     ]
@@ -130,8 +140,8 @@ export function useStatusBar(deps: {
     const usageItems: DropSegment[] = uv
       ? (
           [
-            [`in ${fmtK(uv.input)}`, PRIO.inOut],
-            [`out ${fmtK(uv.output)}`, PRIO.inOut],
+            // in/out 合成一段：它们是一对，分开裁切会被拆散（只剩 out 很怪），合并后同生共死
+            [`in ${fmtK(uv.input)} · out ${fmtK(uv.output)}`, PRIO.inOut],
             [ctxText(uv, maxCtx.value), PRIO.ctx],
             [cacheText(uv), PRIO.cache],
           ] as Array<[string | null, number]>

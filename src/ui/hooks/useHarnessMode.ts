@@ -42,11 +42,9 @@ export function useHarnessMode(deps: {
         store.addNote('后端不支持 mode/set（需要更新 rpc_server.py）。')
         return
       }
-      store.addNote(
-        next === 'plan'
-          ? '已切换到 plan 模式：只做规划/澄清、请求批准后再执行（状态栏可见，下一轮生效）。'
-          : '已切换到 execute 模式：harness 自主执行（下一轮生效，[Mode changed] 通知会注入该轮）。',
-      )
+      // 切成功后**不写转写**：当前模式在右列「模式」区与状态栏 harness 段常驻显示，
+      // 写进转写只会刷屏（实测连按 9 次 Shift+Tab，9 行通知盖满整个转写区）。
+      // next 仍要读出来：它同时是「后端是否真的支持 mode/set」的判据（上面那支）。
     } catch (err) {
       store.addNote(`切换模式失败：${err instanceof Error ? err.message : String(err)}`)
     }

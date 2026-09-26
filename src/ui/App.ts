@@ -4,8 +4,9 @@
  * 版面（全屏 + alternate screen，坐标都是绝对单元格坐标）：
  *   y=0..divider-1  空态：欢迎块（版本边框 + 像素 logo + model/cwd + Tips）+ 空态提示；
  *                   有内容：转写正文（transcript plane：流式增量只重绘这里）
- *   y=dividerY      分割线
+ *   y=dividerY      分割线（输入区上沿）
  *   y=inputY        输入行（> 前缀 + 无边框 TInput + 占位符，overlay plane——补全弹窗同平面）
+ *   y=statusDividerY 分割线（输入区下沿，把输入行与状态栏分开）
  *   y=statusY       状态栏（phase · 模式 · 模型 · cwd / 会话 · tok · tools）
  *
  * 流式输出的落点全在 TranscriptStore：每次增量只改一行 + 自增 version，
@@ -33,6 +34,7 @@ import { StatusStrip } from './components/StatusStrip.ts'
 import { DividerBar } from './components/DividerBar.ts'
 import { ComposerRow } from './components/ComposerRow.ts'
 import { PickerStack } from './components/PickerStack.ts'
+import { TipsColumn } from './components/TipsColumn.ts'
 import { createTranscriptStore, type TranscriptStore } from '../transcript/index.ts'
 import type { Phase } from '../session/sink.ts'
 
@@ -114,6 +116,7 @@ export const App = defineComponent({
     const { displayModel, maxCtx, usageView, imageSupported } = model
     // 思考强度域：/effort（含 Alt+E 直切）
     const effort = useEffortControl({ session: sessionCtl, ui, store })
+    const { effort: effortLevel } = effort
     // 贴图域：Alt+V 剪贴板贴图（待发图片 / 指示条 / 占位符文案）
     const image = useImageAttachment({ session: sessionCtl, imageSupported, store })
     const { chipText: imageChipText, placeholderText } = image
@@ -137,6 +140,7 @@ export const App = defineComponent({
       usageView,
       maxCtx,
       harnessMode,
+      effort: effortLevel,
       cols: computed(() => size.value.cols),
     })
     const commands = useSlashCommands({
@@ -216,7 +220,7 @@ export const App = defineComponent({
 
     return () => {
       const cols = size.value.cols
-      const l = layoutOf(size.value.rows)
+      const l = layoutOf(size.value.rows, cols)
       // 关键：在分支之前先读一次 version，让整个渲染函数成为它的依赖。
       // 否则「空态」那一支不读任何响应式值，视图永远不会被唤醒去渲染正文
       //（子组件各自也读 version，这里是装配层的兜底）。
@@ -229,7 +233,8 @@ export const App = defineComponent({
         h(TRenderPlane, { plane: 'transcript', key: 'body' }, () => [
           h(TranscriptPane, {
             store,
-            cols,
+            // 左列可用宽：两列时是竖线左边的宽度（右列见下面 chrome plane 的 TipsColumn）
+            cols: l.transcriptW,
             y: l.transcriptY,
             height: l.transcriptH,
             model: displayModel.value,
@@ -242,6 +247,26 @@ export const App = defineComponent({
           h(StatusStrip, { parts: segs.parts, right: segs.right, cols, y: l.statusY }),
         ]),
         h(TRenderPlane, { plane: 'chrome', key: 'divider' }, () => [h(DividerBar, { cols, y: l.dividerY })]),
+        // 状态栏上分割线：把输入行与状态栏分开（与输入区上沿那条同源，都在 chrome plane）
+        h(TRenderPlane, { plane: 'chrome', key: 'divider-status' }, () => [
+          h(DividerBar, { cols, y: l.statusDividerY }),
+        ]),
+        // ── 右列：竖线 │ + Tips/快捷键（文案全静态，挂 chrome plane 就够）──
+        // 终端不够宽（< layout.ts 的 TWO_COL_MIN）时整块不渲染，转写独享整宽。
+        ...(l.twoCol
+          ? [
+              h(TRenderPlane, { plane: 'chrome', key: 'tips' }, () => [
+                h(TipsColumn, {
+                  x: l.gutterX,
+                  height: l.gutterH,
+                  tipsX: l.tipsX,
+                  tipsW: l.tipsW,
+                  // 右列顶部「模式」区随 Shift+Tab 实时变（harnessMode 是 rpc 会话模式域的信号）
+                  mode: harnessMode.value,
+                }),
+              ]),
+            ]
+          : []),
         // 输入行 = '>' 前缀 + 无边框 TInput + 占位符（step 风格）。
         // 必须在 'overlay' plane：补全弹窗画在 zIndex 1e4 的 overlay 栈，
         // 挂普通 plane/root 会被逐帧合并吃掉（实测 7 槽只剩 1 行）。

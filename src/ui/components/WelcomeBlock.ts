@@ -1,19 +1,19 @@
 /**
- * 空态欢迎块（step 风格）：版本边框 + 像素 logo + model/cwd 信息列 + Tips 三条 + 空态提示行。
+ * 空态欢迎块（step 风格）：版本边框 + 像素 logo + model/cwd 信息列 + 空态提示行。
  *
  * 内容必须是 TBox 的 children（兄弟节点会被盒体自身的填充覆盖，实测结论）；
  * child 坐标相对内框。转写区不够高时（< 边框 + 1 行）只留空态提示行，不画盒子。
+ * 命令/快捷键 Tips 归右列（components/TipsColumn.ts），这里不再重复一份。
  */
 import { defineComponent, h, type PropType } from 'vue'
 import { TText } from '@simon_he/vue-tui'
 import { TBox } from '@simon_he/vue-tui/vue'
-import { COMMANDS, EMPTY_NOTE } from '../texts.ts'
+import { EMPTY_NOTE } from '../texts.ts'
 import { APP_ART, APP_VERSION } from '../../core/brand.ts'
 import { styles } from '../../core/theme.ts'
 
-/** 边框 2 + logo 区 + 空行 + Tips 标签与 3 条（child y0..11 → 内框 12 行） */
-const BOX_H = 14
-const TIP_CMDS = ['/rpc', '/sessions', '/help'] as const
+/** 盒子总高：边框 2 + 内框 7（APP_ART 7 行；model/cwd 与它并排，不额外占行） */
+const BOX_H = 9
 
 export const WelcomeBlock = defineComponent({
   name: 'WelcomeBlock',
@@ -60,23 +60,14 @@ export const WelcomeBlock = defineComponent({
                   }),
                   h(TText, { x: 15, y: 2, w: 4, h: 1, value: 'cwd', style: styles.infoLabel }),
                   h(TText, { x: 22, y: 2, w: Math.max(8, cols - 25), h: 1, value: process.cwd(), style: styles.infoValue }),
-                  // Tips：命令蓝、说明灰（desc 与 /help 同源 COMMANDS）
-                  h(TText, { x: 1, y: 8, w: 8, h: 1, value: 'Tips', style: styles.infoLabel }),
-                  ...TIP_CMDS.flatMap((cmd, i) => {
-                    const item = COMMANDS.find((c) => c.cmd === cmd)
-                    if (!item) return []
-                    return [
-                      h(TText, { x: 1, y: 9 + i, w: 12, h: 1, value: cmd, style: styles.tipCmd }),
-                      h(TText, { x: 13, y: 9 + i, w: Math.max(8, cols - 16), h: 1, value: item.desc, style: styles.tipDesc }),
-                    ]
-                  }),
                 ],
               ),
             ]
           : []),
         h(TText, {
           x: 2,
-          y: BOX_H + 1,
+          // 提示行跟在盒子下面；转写区放不下盒子时也绝不许越界到分割线/输入行上
+          y: Math.min(BOX_H + 1, Math.max(0, props.transcriptH - 1)),
           w: Math.max(10, cols - 4),
           h: 1,
           style: styles.faint,

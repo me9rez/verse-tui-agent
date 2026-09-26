@@ -18,6 +18,9 @@ import { listSessions, loadSession, setSessionDir } from '../src/session/persist
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../src/ui/App.ts'
 import { styles } from '../src/core/theme.ts'
+import { cellWidth } from '../src/core/text.ts'
+// 右列宽度常量：断言竖线画在哪一列要跟 layout 的定义同源（写死数字会漂移）
+import { TIPS_COLS } from '../src/ui/layout.ts'
 
 // 会话落盘断言会真的写文件，所以把会话目录指到临时目录——绝不往仓库的 .verse-sessions/ 里写测试数据。
 setSessionDir(mkdtempSync(join(tmpdir(), 'verse-smoke-')))
@@ -64,6 +67,20 @@ void out
 /** 软断言 = 旧 check()「失败不阻断、最后统一算账」语义 */
 const check = (name: string, ok: boolean, detail: string): void => {
   expect.soft(ok, `${name} — ${detail}`).toBe(true)
+}
+
+/**
+ * 一行里竖线 │ 所在的**单元格列**（没有则 null）。
+ * 必须按 cellWidth 累加：中文占 2 列，`line.indexOf('│')` 给的是字符下标，
+ * 拿它当列号会得到错的结论（本功能开发时就这么误判过一次「竖线丢格」）。
+ */
+const barCol = (line: string): number | null => {
+  let col = 0
+  for (const ch of line) {
+    if (ch === '│') return col
+    col += cellWidth(ch)
+  }
+  return null
 }
 
 /** 供 afterAll 写产物的最后一帧 */
@@ -262,6 +279,41 @@ test('smoke：流式 / 渲染 / 折叠 / 颜色 / 落盘 / 中断全链路', { t
     "'>' 前缀与占位符可见（step 风格无边框输入行）",
   )
   check('响应式宽度未溢出', finalScreen.every((line) => line.length <= COLS), `所有行 ≤ ${COLS} 列`)
+
+  // ── 两列布局：左列转写、右列 Tips（100 列够宽 → 右列开着）──
+  const gutter = COLS - TIPS_COLS
+  const barCols = finalScreen.map(barCol).filter((c): c is number => c !== null)
+  check(
+    '两列：竖线 │ 画在右列左边界且贯穿转写区',
+    barCols.length >= 20 && barCols.every((c) => c === gutter),
+    `${barCols.length} 行有竖线，出现在列 ${[...new Set(barCols)].join('/')}（期望 ${gutter}）`,
+  )
+  const leftWidths = finalScreen
+    .filter((line) => barCol(line) === gutter)
+    .map((line) => {
+      let col = 0
+      for (const ch of line) {
+        if (ch === '│') break
+        col += cellWidth(ch)
+      }
+      return col
+    })
+  check(
+    '两列：左列内容止于竖线之前（正文不越线）',
+    leftWidths.length > 0 && leftWidths.every((w) => w <= gutter),
+    `竖线前最宽 ${Math.max(...leftWidths)} ≤ ${gutter}`,
+  )
+  // 只认右列独有的文案：'Shift+Tab' 在输入行占位符里也有，拿它当证据会假阳性（踩过）
+  check(
+    '两列：右列顶部有「模式」区（mock 会话显示无 harness 模式）',
+    finalScreen.join(NL).includes('mock 无 harness 模式'),
+    `右列模式区文案可见=${finalScreen.join(NL).includes('mock 无 harness 模式')}`,
+  )
+  check(
+    '两列：右列画出 Tips 与快捷键',
+    ['Tips', '切到 agent 后端', '折叠全部', '贴剪贴板图片'].every((s) => finalScreen.join(NL).includes(s)),
+    `右列文案命中：${['Tips', '切到 agent 后端', '折叠全部', '贴剪贴板图片'].filter((s) => finalScreen.join(NL).includes(s)).join('、')}`,
+  )
   check(
     'Esc 能中断一轮',
     api.store.rowCount() > rowsAtLongStart && /已中断/.test(afterInterrupt),
@@ -338,6 +390,58 @@ test('smoke：流式 / 渲染 / 折叠 / 颜色 / 落盘 / 中断全链路', { t
   )
 
   reportStats = { commits, versionSamples: versionSamples.length, versionSpan: incr, stats: firstState }
+})
+
+// ── 窄终端降级：另起一个 80 列实例（< layout.ts 的 TWO_COL_MIN）──
+// 两列是「够宽才开」，这里断言窄屏下右列整块不存在、转写回到整宽。
+test('smoke：窄终端（80 列）退回单列，不画右列', { timeout: 60_000 }, async () => {
+  const narrow: { api: AppApi | null } = { api: null }
+  const narrowApp = createTerminalApp({
+    cols: 80,
+    rows: ROWS,
+    component: App,
+    props: {
+      speed: 0.1,
+      onReady(next: AppApi) {
+        narrow.api = next
+      },
+    },
+    defaultStyle: styles.text,
+  })
+  narrowApp.mount()
+  const narrowOut = createStdoutRenderer(narrowApp.terminal, {
+    output: { write: () => {}, isTTY: false },
+    clear: false,
+    hideCursor: false,
+    altScreen: false,
+    trackResize: false,
+    defaultBg: null,
+  })
+  try {
+    await sleep(150)
+    const api = narrow.api
+    if (!api) throw new Error('窄实例未在 150ms 内就绪')
+    const lines = api.screenText()
+    const text = lines.join(NL)
+    check(
+      '窄终端：右列文案整体不出现',
+      ['Tips', '切到 agent 后端', '折叠全部', '贴剪贴板图片'].every((s) => !text.includes(s)),
+      `出现的右列文案：${['Tips', '切到 agent 后端', '折叠全部', '贴剪贴板图片'].filter((s) => text.includes(s)).join('、') || '（无）'}`,
+    )
+    check(
+      '窄终端：右列竖线该在的列（80-34=46）没有线',
+      lines.every((line) => barCol(line) !== 80 - TIPS_COLS),
+      `列 ${80 - TIPS_COLS} 出现竖线的行数 = ${lines.filter((l) => barCol(l) === 80 - TIPS_COLS).length}`,
+    )
+    check(
+      '窄终端：所有行 ≤ 80 列',
+      lines.every((line) => cellWidth(line) <= 80),
+      `最宽 ${Math.max(...lines.map((l) => cellWidth(l)))} 列`,
+    )
+  } finally {
+    narrowOut.dispose()
+    narrowApp.dispose()
+  }
 })
 
 afterAll(() => {

@@ -63,7 +63,7 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 | 目录 | 内容 |
 |---|---|
 | `src/cli/` | 可执行入口：`terminal.ts`（交互 TUI）、`shot.ts`（出图） |
-| `src/ui/` | `App.ts`（装配层：props / hook 串联 / 4 个 `TRenderPlane` 外壳 / `AppApi`）、`hooks/`（11 个组合式函数，无渲染）、`components/`（7 个渲染子组件）、`layout.ts`（版面坐标）、`texts.ts`（命令表与文案） |
+| `src/ui/` | `App.ts`（装配层：props / hook 串联 / 4 个 `TRenderPlane` 外壳 / `AppApi`）、`hooks/`（11 个组合式函数，无渲染）、`components/`（8 个渲染子组件，含两列右列的 `TipsColumn`）、`layout.ts`（版面坐标）、`texts.ts`（命令表与文案） |
 | `src/session/` | 接缝 `seam.ts` + 实现 `mock.ts` / `rpc.ts` + `sink.ts`（事件→转写分组）+ `persist/`（落盘） |
 | `src/transcript/` | 转写域：`LineStream` + `TranscriptStore`（分组、可见行过滤、版本号） |
 | `src/core/` | 底座：`config.ts`（gateway 客户端）、`theme.ts`、`syntax.ts`、`text.ts`、`html.ts`、`brand.ts` |
@@ -111,6 +111,10 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
   折叠是**数据源过滤**（`visibleEntries()`），不是像素隐藏，`rowCount()/getRow()` 都走过滤后的行。
 - **给库腾位置**：输入行与 `/` 补全弹窗必须挂在 `TRenderPlane plane="overlay"`；`TBox` 的内容要做成 children
   （兄弟节点会被盒体填充覆盖）。这些不是风格偏好，是实测结论。
+- **两列布局的开关与列宽只在 `layout.ts`**：`TWO_COL_MIN`（开两列的终端最小宽度，90）与 `TIPS_COLS`
+  （右列整块宽度，34）是唯一来源，组件里不许再写宽度数字；右列（竖线 + 模式区 + Tips + 快捷键）挂 **chrome plane**
+  （文案全静态，不跟流式高频重绘），竖线是右列的一部分、**整列用一个多行 `TText`** 画（库没有竖向 divider，
+  见 README 踩坑条）。按列号写断言必须用 `cellWidth()` 累加，不能用字符串下标（中文占 2 列）。
 - **数组/对象的响应式要真响应式**：跨组件共享的配置必须是 `ref`（`src/core/config.ts` 曾用普通 `let` 导致
   `computed` 永久缓存空数组，`/model` 误判 `[models] 为空`）。
 - 改界面文案先看 `src/ui/texts.ts` 有没有现成常量；噪音文案（「（点我展开）」之类）不要加。
@@ -120,7 +124,8 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
   scheduler（只标脏那一个 plane）；其余 hook/组件统一收 `invalidate: () => void` 参数，hook 之间按拓扑序
   传参注入，不引 provide/inject。`components/` 之间不互相 import（跨域成员由 App 用 `TRenderPlane` 装）。
 - **状态栏窄终端裁切按优先级来**：`hooks/useStatusBar.ts` 的 `PRIO` 表决定先丢谁（cwd → cache →
-  耗时 → ctx → in/out → 模型名 → tools → harness → 会话名 → 模式），左右两段**一起**参与裁切，phase 段保底。
+  耗时 → ctx → in/out → 模型名 → tools → 思考强度 → harness → 会话名），左右两段**一起**参与裁切，phase 段保底；
+  左段不显示模式（右段会话 label 已带），别把 `rpc`/`mock` 抄回左段。
   别退回「只丢左段」——右段（usage）变长会把模型段与 harness 段一起带走，`pnpm rpc` 在 100 列下正是守这两段。
 
 ## 7. 测试纪律

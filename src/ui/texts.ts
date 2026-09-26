@@ -14,15 +14,17 @@ export type SlashCommand = Readonly<{
   desc: string
   /** 参数占位（含括号，如 '<序号|id>'，可选）：进 HELP 与补全 detail 前缀 */
   usage?: string
+  /** 右列 Tips 用的短描述（右列只有约 20 列放说明，长 desc 会被截）：缺省回落 desc */
+  short?: string
 }>
 
 export const COMMANDS: readonly SlashCommand[] = [
-  { cmd: '/help', desc: '显示这份说明' },
+  { cmd: '/help', desc: '显示这份说明', short: '全部命令说明' },
   { cmd: '/clear', desc: '清空转写' },
   { cmd: '/long', desc: '跑一段长回答（演示滚动与自动贴底）' },
-  { cmd: '/rpc', desc: '切到唯一 agent 后端（WebSocket JSON-RPC，需先 pnpm backend 起服务）' },
+  { cmd: '/rpc', desc: '切到唯一 agent 后端（WebSocket JSON-RPC，需先 pnpm backend 起服务）', short: '切到 agent 后端' },
   { cmd: '/env', desc: '看当前后端配置（不回显密钥）' },
-  { cmd: '/sessions', desc: '列出落盘的会话（▶ = 当前）' },
+  { cmd: '/sessions', desc: '列出落盘的会话（▶ = 当前）', short: '看落盘会话' },
   { cmd: '/open', usage: '[序号|id]', desc: '切换会话（恢复转写与模型上下文），无参弹选择器' },
   { cmd: '/new', usage: '[标题]', desc: '新建一个空会话' },
   { cmd: '/rename', usage: '<标题>', desc: '给当前会话改名' },
@@ -38,6 +40,26 @@ export const COMMANDS: readonly SlashCommand[] = [
 const token = (c: SlashCommand): string => (c.usage ? `${c.cmd} ${c.usage}` : c.cmd)
 
 export const HELP = ['可用命令：', ...COMMANDS.map((c) => `  ${token(c).padEnd(17)} ${c.desc}`)].join('\n')
+
+/**
+ * 右列（components/TipsColumn.ts）的快捷键提示。
+ * 文案与 README「键位」表保持一致 —— 改这里记得同步 README，反之亦然。
+ */
+/**
+ * harness 模式短说明（右列「模式」区用，宽度务必 ≤ 22 列）。
+ * 完整通知文案不再写进转写（见 hooks/useHarnessMode.ts），模式只在右列与状态栏呈现。
+ */
+export const MODE_HINT: Readonly<Record<string, string>> = {
+  plan: '只规划，等批准',
+  execute: '自主执行',
+}
+
+export const KEY_HINTS: readonly { keys: string; what: string }[] = [
+  { keys: 'Shift+Tab', what: '切 plan/exec' },
+  { keys: 'Ctrl+O', what: '折叠全部' },
+  { keys: 'Alt+V', what: '贴剪贴板图片' },
+  { keys: 'Esc', what: '中断当前轮' },
+]
 
 export const NL = String.fromCharCode(10)
 

@@ -1,4 +1,5 @@
-/* Shift+Tab 切 harness 模式端到端（真连后端）：BackTab 事件 → note + 状态段 + 信号跟随，来回切一圈。 */
+/* Shift+Tab 切 harness 模式端到端（真连后端）：BackTab 事件 → 右列模式区 + 状态栏段 + 信号跟随，
+   来回切一圈；并守住「切换通知不再写进转写」这条（右列与状态栏已常驻显示模式）。 */
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { getBackendMode } from '../session/mode.ts'
@@ -49,14 +50,16 @@ check('握手回填默认模式', getBackendMode() === 'plan', `mode=${getBacken
 
 // 1. 第一次 Shift+Tab → execute
 app.events.dispatch({ type: 'keydown', key: 'BackTab' })
-const gotExec = await waitFor('已切换到 execute 模式', 'execute 切换 note')
+const gotExec = await waitFor('自主执行', '右列模式区切到 execute')
 check('Shift+Tab → execute', gotExec && getBackendMode() === 'execute',
   `mode=${getBackendMode()}，状态段 ${/· execute ·/.test(screen()) ? '有' : '无'}`)
 check('状态栏显示 execute 模式段', /· execute ·/.test(screen()), getBackendMode())
+check('模式切换不再写进转写', !storeText().includes('已切换到'),
+  `转写里出现「已切换到」=${storeText().includes('已切换到')}（模式只在右列与状态栏显示）`)
 
 // 2. 再按 Shift+Tab → 回 plan
 app.events.dispatch({ type: 'keydown', key: 'BackTab' })
-const gotPlan = await waitFor('已切换到 plan 模式', 'plan 切换 note')
+const gotPlan = await waitFor('只规划，等批准', '右列模式区回 plan')
 check('再 Shift+Tab → 回 plan', gotPlan && getBackendMode() === 'plan',
   `mode=${getBackendMode()}，状态段 ${/· plan ·/.test(screen()) ? '有' : '无'}`)
 

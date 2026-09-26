@@ -16,7 +16,7 @@ const app = createTerminalApp({
 
 // ── mount 之前包装：之后组件绑定的也是包装版 ──
 // 监听弹窗区域的每一次写入：区域随布局走（弹窗挂在输入行上方）
-const L = layoutOf(44)
+const L = layoutOf(44, 120)
 const Y0 = L.inputY - 9
 const Y1 = L.inputY - 1
 const origWrite = app.terminal.write.bind(app.terminal)

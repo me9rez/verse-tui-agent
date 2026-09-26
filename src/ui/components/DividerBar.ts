@@ -1,4 +1,4 @@
-/** 分割线：输入行上方一整行 '─'（每帧只有一行文本，交给 chrome plane 低频重绘）。 */
+/** 分割线：整行 '─'（输入区上沿与下沿各一条；每帧只有一行文本，交给 chrome plane 低频重绘）。 */
 import { defineComponent, h } from 'vue'
 import { TText } from '@simon_he/vue-tui'
 import { styles } from '../../core/theme.ts'
