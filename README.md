@@ -53,7 +53,7 @@ pnpm dev -- --session 20260918-172237-uw3c   # 直接打开指定会话
 | `pnpm hotkeys` | vitest：Alt+M/Alt+E 路由 + 状态栏 usage 格式化与窄终端裁切 14 项软断言（离线） |
 | `pnpm sessions` | vitest：会话落盘 / 读回（含 usage 持久化）/ 重放 / 记录器 25 项（离线，用临时目录，不碰仓库） |
 | `pnpm config-test` | pytest：后端 TOML 配置 11 函数 35 断言（深合并/overrides/新模型字段/脱敏/坏文件回退，离线） |
-| `pnpm test:backend` | pytest 全量：25 函数 79 断言（protocol 十秒内；agent/switch 打真模型） |
+| `pnpm test:backend` | pytest 全量：49 函数 146 断言（protocol 十秒内；纯域离线单测秒级；agent/switch 打真模型） |
 | `pnpm shot` | 把跑完的一轮渲染成带色 HTML，便于出图 |
 | `pnpm build` | tsdown 编译 `src/cli` 两个入口到 `dist/`（`bin`: `verse` → `dist/terminal.mjs`，带 shebang 可直接执行） |
 | `pnpm typecheck` | `tsc -p tsconfig.json`（零报错） |
@@ -280,6 +280,11 @@ agent 后端，所有 agent 能力统一用 Microsoft Agent Framework 的 harnes
 todo/工具循环 + FileHistoryProvider 跨进程历史）在 `backend/` 内开发；TS 侧只做渲染与会话编排。
 `live` / `ai` 两条旧实现**已删除**，`mock` 永久保留为离线测试夹具。
 
+后端按**功能域**拆成 12 个模块（`rpc_protocol` 协议壳与错误码 / `bootstrap` 引导 / `harness` 装配 /
+`thinking`+`images` 纯域 / `runtime` 状态 / `turn` 轮次 / `methods_*` 方法 / `dispatch`+`server` 分发与传输），
+`rpc_server.py` 只剩入口；依赖单向无环，模块边界与不变量见 `docs/architecture.md` §6。协议 SSOT 在
+`backend/rpc_protocol.py` 的模块 docstring。
+
 ```bash
 # 1. 起后端（= cd backend && uv run python rpc_server.py；首次先 cd backend && uv sync）
 pnpm backend
@@ -288,14 +293,15 @@ pnpm backend
 pnpm dev -- --rpc         # 或 tui.toml 设 agent = "rpc"，或 TUI 里敲 /rpc
 
 # 3. 断言（协议级 + 无头端到端）
-pnpm config-test        # pytest：配置 11 函数 35 断言
-pnpm test:backend       # pytest 全量 25 函数 79 断言（或 uv run pytest tests/test_rpc_protocol.py -q 只跑协议）
+pnpm config-test        # pytest：配置 11 函数 35 断言（离线）
+pnpm test:backend       # pytest 全量 49 函数 146 断言（含 18 条纯域离线单测；agent/switch 打真模型）
+                        # 只跑纯域（秒级、不联网）：cd backend && uv run pytest tests/test_unit_*.py -q
 pnpm rpc                # vitest：TUI↔后端真实链路 8 项
 pnpm model              # vitest：/model 选择器 5 项
 pnpm effort             # vitest：/effort 思考强度 5 项（离线）
 ```
 
-协议（JSON-RPC 2.0 over WebSocket，**权威定义见 `backend/rpc_server.py` 模块 docstring**）：
+协议（JSON-RPC 2.0 over WebSocket，**权威定义见 `backend/rpc_protocol.py` 模块 docstring**）：
 
 ```
 请求   {"jsonrpc":"2.0","id":1,"method":"agent/chat","params":{"session":"vt-xxx","prompt":"…"}}
@@ -382,7 +388,9 @@ Alt+V 贴的图片经历史 provider 以 data URI 随会话 JSONL 明文落盘�
 | `pnpm complete` | slash 命令补全的按键注入链路（vitest，离线 mock） | 5 |
 | `pnpm effort` | `/effort` 思考强度：补全 / mock 守卫 / 选择器回退 / HELP 派生（vitest，离线 mock） | 5 |
 | `pnpm config-test` | TOML 配置：三文件深合并 / overrides / Kimi 同款模型字段 / 脱敏 / 坏文件回退（pytest） | 35 |
-| `backend/tests/test_rpc_*.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/thinking 档位/images 校验/`config/get`（pytest，拆 protocol 31 + agent 7） | 38 |
+| `backend/tests/test_projection.py` | 图片投影：占位符确定性 / 字典级与 Message 级投影（pytest，离线） | 17 |
+| `backend/tests/test_unit_*.py` | 纯域离线单测：协议常量与信封 / 图片校验与能力门控 / 思考档位 / 模型解析与压缩预算 / 导入纯净性（pytest，秒级不联网） | 47 |
+| `backend/tests/test_rpc_*.py` | 协议级：握手/流式/上下文/工具/取消/错误码/model 切换/mode 切换/thinking 档位/images 校验/`config/get`（pytest，拆 protocol 30 + agent 11） | 41 |
 | `backend/tests/test_switch.py` | 协议级：会话切换/隔离/重连恢复（pytest） | 6 |
 | `pnpm sessions` | 会话落盘 / 读回（含 usage 持久化）/ 重放 / 记录器（vitest，临时目录） | 25 |
 

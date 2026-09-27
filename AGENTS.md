@@ -69,16 +69,22 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 | `src/core/` | 底座：`config.ts`（gateway 客户端）、`theme.ts`、`syntax.ts`、`text.ts`、`html.ts`、`brand.ts` |
 | `src/probes/` | 一次性探针：摸库行为 + 排版回归，**不是测试套件**，可随时新增 |
 | `test/` | vitest 套件（根目录，6 个文件），断言真事 |
-| `backend/` | `rpc_server.py`（协议 SSOT 在模块 docstring）+ `config.py` + `tests/`（pytest） |
+| `backend/` | 入口 `rpc_server.py` + **协议 SSOT 在 `rpc_protocol.py` 的模块 docstring** + `bootstrap`/`config` + `harness`（装配）+ `thinking`/`images`（纯域）+ `runtime`（状态）+ `turn`（轮次）+ `methods_*`（方法）+ `dispatch`/`server`（分发与传输）+ `tests/`（pytest） |
+
+`backend/` 内部同样单向无环：`rpc_server → server → dispatch → methods_* → {turn, runtime} → harness →
+{bootstrap, config, projection}`，`rpc_protocol`（信封/错误码/每连接发送口 `Conn`）只被只读引用。
+**纯域（`rpc_protocol`/`images`/`thinking`/`harness`）不许有导入期副作用**（不 chdir、不建目录、不打网络），
+`bootstrap.init()` 是唯一允许 chdir 的地方——`backend/tests/test_unit_purity.py` 守着这条，
+它是「纯逻辑能离线断言」的前提（改坏了会立刻变红）。
 
 ## 4. 落点速查：想加东西改哪里
 
 | 想加什么 | 改哪里 | 不要碰 |
 |---|---|---|
 | 新的 slash 命令 | `src/ui/texts.ts` 的 `COMMANDS`（**唯一数据源**，`/help` 与 `/` 补全都从它派生）+ `src/ui/hooks/useSlashCommands.ts` 的分发分支 + 一个 test | 别在别处再抄一份命令文案 |
-| 新工具 / 新 agent 能力 | `backend/rpc_server.py` 的 `create_harness_agent(...)` 装配 | 协议、前端（工具行自动出现） |
+| 新工具 / 新 agent 能力 | `backend/harness.py` 的 `build_agent(...)` 装配（配置相关再加 `bootstrap`/`config.py`） | 协议、前端（工具行自动出现） |
 | 新模型 / provider | `~/.verse/config.toml` 的 `[providers.*]` / `[models.*]` | 协议、事件模型 |
-| 新交互能力（审批、diff 预览…） | 新事件 type + `rpc_server.py` 分发 + 前端 `TurnSink` 映射 | 已有字段语义与「一轮一个终态」 |
+| 新交互能力（审批、diff 预览…） | 新事件 type + `rpc_protocol.py`（事件/错误码）+ 落一个 `methods_*.py` 处理器并在 `dispatch.py` 注册 + 前端 `TurnSink` 映射 | 已有字段语义与「一轮一个终态」 |
 | 新配置项 | `backend/config.py` 的 `DEFAULTS` / `DEFAULT_TUI` + `docs/config.example.toml` / `docs/tui.example.toml` + `README` 配置表 | — |
 | 新排版/配色 | `src/core/theme.ts`（hex 单源）+ `src/transcript/store.ts` | 别在组件里散写颜色 |
 

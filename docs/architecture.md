@@ -62,11 +62,24 @@ vue-tui-demo/
   src/                    # TUI（不变，接缝 AgentSession 的四个实现）
   backend/                # ★ 新增：唯一 agent 后端
     pyproject.toml        # uv 项目：agent-framework + websockets
-    rpc_server.py         # 服务端 = 协议 docstring + 装配 + 分发（单文件，约 330 行）
-    tests/                # pytest（conftest + rpc_helpers + 四个 test_*.py）
-      test_rpc_protocol.py # 协议级 17 断言（握手/config/get/错误/model/mode）
-      test_rpc_agent.py    # agent 轮次 7 断言（流式/上下文/工具/cancel，真模型）
-      test_switch.py       # 会话语义 6 断言（切换/隔离/重启恢复）
+    rpc_server.py         # ★ 入口：docstring 指针 + bootstrap.init() + 启动装配 + __main__
+    rpc_protocol.py       # 协议 SSOT docstring + 错误码常量 + 方法清单 + Conn（每连接串行发送）
+    bootstrap.py          # 配置装载转发 / 路径解析 / 日志 / 幂等 init()（唯一 chdir 处）
+    harness.py            # 模型 ref 解析 + 压缩预算 + chat client/harness 装配
+    thinking.py           # 思考档位（纯函数）      images.py    图片校验与能力门控（纯函数）
+    runtime.py            # RT 单实例状态 + 会话对象复用（plan/todos/mode 跨轮持久的地基）
+    turn.py               # 一轮执行 + chunk→事件映射（MAX_RUN_SECONDS）
+    methods_agent.py      # agent/chat · agent/cancel · agent/reset
+    methods_model.py      # model/set · thinking/get · thinking/set
+    methods_session.py    # mode/get · mode/set
+    methods_config.py     # config/get · initialize · ping
+    dispatch.py           # 方法表 + 连接级约束（-32003 忙门）  server.py  连接循环 + serve
+    tests/                # pytest（conftest + rpc_helpers + test_*.py）
+      test_rpc_protocol.py # 协议级 30 断言（握手/config/get/错误/model/mode/thinking/images，真模型）
+      test_rpc_agent.py    # agent 轮次 11 断言（流式/上下文/工具/cancel/带图投影，真模型）
+      test_switch.py       # 会话语义 6 断言（切换/隔离/重启恢复，真模型）
+      test_config.py       # 配置 35 断言（离线）    test_projection.py  投影 17 断言（离线）
+      test_unit_*.py       # 纯域离线 47 断言（协议常量与信封/图片/思考档位/模型解析与压缩预算/导入纯净性）
     repro_cancel.py       # 取消路径的聚焦复现工具
     history/              # 运行时数据：每 session 一个 JSONL（gitignore）
     .venv/                # uv 环境（gitignore）
@@ -81,10 +94,15 @@ pnpm backend              # = cd backend && uv run python rpc_server.py（首次
 pnpm dev -- --rpc         # TUI 接上；或 tui.toml 设 agent = "rpc"；或进 TUI 后敲 /rpc
 ```
 
+**模块布局（按功能域拆分，2026-09-27）**：`rpc_server.py` 只是入口（docstring 指针 + 启动装配），
+协议壳在 `rpc_protocol.py`、引导在 `bootstrap.py`、装配在 `harness.py`、纯域在 `thinking.py`/`images.py`、
+状态在 `runtime.py`、轮次在 `turn.py`、方法按协议域分在 `methods_*.py`、分发与传输在 `dispatch.py`/`server.py`。
+依赖单向无环，详见 §6。
+
 ## 4. 协议层（JSON-RPC 2.0 over WebSocket）
 
-完整协议以 `backend/rpc_server.py` 模块 docstring 为唯一权威来源（single source of truth），
-本文只给骨架与演化规则。
+完整协议以 `backend/rpc_protocol.py` 模块 docstring 为唯一权威来源（single source of truth），
+本文只给骨架与演化规则。改协议 = 先改那份 docstring 与 `METHODS`/错误码常量，再改 `methods_*.py`。
 
 ### 4.1 方法
 
@@ -145,6 +163,27 @@ pnpm dev -- --rpc         # TUI 接上；或 tui.toml 设 agent = "rpc"；或进
 
 ## 6. 后端内部架构
 
+### 6.0 模块边界（按功能域拆分，2026-09-27）
+
+| 模块 | 职责 | 约束 |
+|---|---|---|
+| `rpc_server.py` | 入口：docstring 指针 + `bootstrap.init()` + 启动装配 + `__main__` | 不再放业务逻辑 |
+| `rpc_protocol.py` | 协议 SSOT docstring + 错误码常量 + `METHODS` + 信封构造 + `Conn`（每连接串行发送） | 不 import 方法/装配模块 |
+| `bootstrap.py` | 配置装载转发、路径解析、日志、幂等 `init()` | 不含协议与 agent 逻辑；**唯一 chdir/建目录处** |
+| `harness.py` | `resolve_model` / `compaction_kwargs` / `build_agent` | 不读模块全局（cfg/workspace/history 收参数） |
+| `thinking.py` / `images.py` | 思考档位、图片校验与能力门控（纯函数） | 导入期无副作用（不建目录、不 chdir、不打网络） |
+| `runtime.py` | `RT` 单实例状态（模型/provider/client/agent/档位）+ 会话对象复用 | 不感知 WebSocket |
+| `turn.py` | 一轮执行 + chunk→事件映射（`MAX_RUN_SECONDS`） | 不做分发、不判忙 |
+| `methods_agent/model/session/config.py` | 每个 JSON-RPC 方法一个处理器，按协议域分四个文件 | 不 import `dispatch`/`server` |
+| `dispatch.py` | 方法表 `HANDLERS` + 分发 + 连接级约束（agent/chat 需 id、-32003 忙门） | 不含方法语义 |
+| `server.py` | 连接循环、信封层错误码（-32700/-32600）、`serve` | — |
+
+依赖方向：`rpc_server → server → dispatch → methods_* → {turn, runtime} → harness → {bootstrap, config, projection}`，
+`rpc_protocol` 只被只读引用。**两条不变量**：`bootstrap.init()` 是唯一换 cwd 的地方（`WORKSPACE` 是文件/命令工具的根，
+漏调会让相对路径落到仓库根）；`runtime.RT` 是唯一可变状态写点（切模型只有 `set_model()` 一个出口）。
+`backend/tests/test_unit_purity.py` 用子进程守着第一条；`rpc_protocol.METHODS` 与 `dispatch.HANDLERS` 的一致性由
+`test_unit_protocol.py` 守着。
+
 ### 6.1 装配（唯一入口）
 
 ```python
@@ -184,9 +223,10 @@ agent  = create_harness_agent(
 
 | 想加什么 | 改哪里 | 不改哪里 |
 |---|---|---|
-| 新工具（如浏览器、SQL） | `create_harness_agent(tools=[...])` 或 Agent Framework 自带工具开关 | 协议、前端（工具行自动出现） |
+| 新工具（如浏览器、SQL） | `harness.build_agent(...)` 里的 `create_harness_agent(tools=[...])` 或 Agent Framework 自带工具开关 | 协议、前端（工具行自动出现） |
 | 新模型/新 provider | `config.toml` 的 `[providers."…"]` / `[models."…"]` 表（`config/get` 自动下发） | 协议、事件模型 |
-| 新交互能力（如人工审批、diff 预览） | 新事件 type + `rpc_server.py` 分发 | 已有字段/终态语义（只加不改，§4.4） |
+| 新交互能力（如人工审批、diff 预览） | 新事件 type + `rpc_protocol.py`（事件/错误码）+ 一个 `methods_*.py` 处理器 + `dispatch.HANDLERS` 注册 | 已有字段/终态语义（只加不改，§4.4） |
+| 新 JSON-RPC 方法 | `methods_*.py` 加处理器 + `dispatch.HANDLERS` 注册 + `rpc_protocol.METHODS` 同步 | 已有方法语义（`test_unit_protocol` 守两者一致） |
 | 新会话后端（如多 agent 编排） | Agent Framework 层实现后仍经同一协议暴露 | 前端接缝 `AgentSession` |
 
 明确禁止：
@@ -234,6 +274,18 @@ agent  = create_harness_agent(
 | `pnpm test:backend` | pytest 全量（20 函数） | 53 | **53/53** |
 | `pnpm typecheck` | `tsc -p`（`src/probes/complete.ts` 的既有报错为仓库遗留，与本方向无关） | — | 本次改动 0 错 |
 
+### 10.1 模块拆分后复测（2026-09-27，实测）
+
+| 套件 | 覆盖 | 结果 |
+|---|---|---|
+| `pnpm test:backend` | pytest 全量 49 函数（含 18 条纯域离线单测；agent/switch 打真模型） | **49/49** |
+| `pnpm config-test` | 配置域 11 函数 35 断言（离线） | **11/11** |
+| `pnpm rpc` | TUI↔后端真实链路（真模型） | PASS |
+| `pnpm typecheck` | `tsc -p tsconfig.json` | 0 错 |
+| `pnpm typecheck:backend` | pyright（含 12 个新模块） | 0 错 |
+| `pnpm lint:backend` | ruff | 0 错 |
+| `uv run pytest tests/test_unit_*.py -q` | 纯域离线单测（协议常量与信封 / 图片 / 思考档位 / 模型解析与压缩预算 / 导入纯净性） | **18/18**（7.2s，不联网） |
+
 ## 11. 迁移状态与待决策
 
 **已完成（本方向的验收项）**：
@@ -271,3 +323,4 @@ agent  = create_harness_agent(
 |---|---|
 | 2026-09-24 | 方向确立：单仓 + Agent Framework 唯一后端；`file-history-demo` 迁入 `backend/`；本文档建立 |
 | 2026-09-24 | 删除 `live`/`ai` 后端与依赖，`SessionKind` 收紧为 `'mock' \| 'rpc'`——TS 侧不再有任何 agent 实现 |
+| 2026-09-27 | `backend/rpc_server.py`（714 行）按功能域拆成 12 个模块（协议壳 `rpc_protocol` / 引导 `bootstrap` / 装配 `harness` / 纯域 `thinking`+`images` / 状态 `runtime` / 轮次 `turn` / 方法 `methods_*` / 分发 `dispatch` / 传输 `server`）；协议 SSOT 移到 `rpc_protocol.py`；新增纯域离线单测 18 条（含导入纯净性守则），行为零变化 |
