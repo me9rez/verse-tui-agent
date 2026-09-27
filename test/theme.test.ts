@@ -98,8 +98,22 @@ test('/theme 主题：补全、内置切换、未知名字守卫与选择器', {
 
   // 2. mock 下 /theme light 直切内置 light：主题不依赖后端，palette 整组换掉
   const versionBefore = api.store.version.value
+  // 换主题必须让**每一行**的版本都变 —— 库靠 getRowVersion 决定要不要重取行，
+  // 换色不改行内容，只递增全局 version 是不够的（屏幕上会留一半旧颜色，实测踩过）
+  api.store.addNote('主题切换基线（本行只为让 store 里先有行可对照）')
+  const rowsBefore = api.store.rowCount()
+  const versionsBefore = Array.from({ length: rowsBefore }, (_, i) => api.store.getRowVersion(i))
   api.submit('/theme light')
   await sleep(250)
+  let repainted = 0
+  for (let i = 0; i < rowsBefore; i++) {
+    if (api.store.getRowVersion(i) !== versionsBefore[i]) repainted++
+  }
+  check(
+    '换主题让每一行都被判定为「变了」',
+    repainted === rowsBefore && rowsBefore > 0,
+    `${repainted}/${rowsBefore} 行版本变化（库据此重新 getRow 取新颜色）`,
+  )
   check(
     'palette 切到 light',
     palette.text === LIGHT_THEME.text && palette.background === '#FFFFFF',
@@ -108,7 +122,7 @@ test('/theme 主题：补全、内置切换、未知名字守卫与选择器', {
   check(
     '切换后转写区被要求重绘',
     api.store.version.value > versionBefore,
-    `store.version ${versionBefore} → ${api.store.version.value}（换色靠 bump 全量重绘）`,
+    `store.version ${versionBefore} → ${api.store.version.value}`,
   )
   check(
     '切换提示进转写',

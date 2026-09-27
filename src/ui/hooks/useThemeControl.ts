@@ -80,7 +80,7 @@ export function useThemeControl(deps: {
         if (!next) store.addNote('后端不支持 theme/set（需要更新 rpc_server.py）。')
         else {
           store.addNote(`主题已切换为 ${next}（会话内有效；要常驻就写 tui.toml 的 theme）`)
-          store.bump() // 行样式是渲染时求值的：bump 一次即全量换色
+          store.repaintAll() // 行样式渲染时求值：必须让**每一行**失效，bump 不够（见 store.themeEpoch）
         }
       } catch (err) {
         store.addNote(`切换失败：${err instanceof Error ? err.message : String(err)}`)
@@ -89,7 +89,7 @@ export function useThemeControl(deps: {
     }
     const applied = applyBuiltinTheme(name)
     store.addNote(`主题已切换为 ${applied}（内置；mock 下只有 dark / light，/rpc 后可读自定义主题）`)
-    store.bump()
+    store.repaintAll()
   }
 
   /** 打开主题选择器（/theme 无参）。 */

@@ -153,6 +153,12 @@ export class TranscriptStore implements TTranscriptDataSource {
   entries: Entry[] = []
   groups = new Map<string, Group>()
   version = ref(0)
+  /**
+   * 主题纪元：`repaintAll()` 每次 ++，并混入 `getRowVersion`。换主题**不改任何行的内容**，
+   * 若不让行版本变，库会认为整屏都没变、拒绝重新 getRow —— 于是屏幕上留着一半旧颜色
+   * （2026-09-27 用 themeshot 探针解出 iframe 内容才抓到，光看「version 递增」看不出来）。
+   */
+  themeEpoch = ref(0)
   stats = ref({ turns: 0, tools: 0 })
 
   // 可见行缓存：视图会对每一行调 getRow，逐次过滤就是 O(n²)
@@ -161,6 +167,12 @@ export class TranscriptStore implements TTranscriptDataSource {
 
   bump(): void {
     this.version.value++
+  }
+
+  /** 换主题后调用：内容一行没变，但每一行的颜色都要重取（颜色是渲染时从 palette 取的）。 */
+  repaintAll(): void {
+    this.themeEpoch.value++
+    this.bump()
   }
 
   /** 入表统一走这里：加进 entries 并自增版本（分组行数由 group 自己数） */
@@ -400,8 +412,9 @@ export class TranscriptStore implements TTranscriptDataSource {
     const entry = this.visibleEntries()[index]
     if (!entry) return 0
     const g = entry.group ? this.groups.get(entry.group) : undefined
-    // 折叠状态变化时，头部行必须被判定为「变了」，否则视图不会重画 ▸/▾
-    return entry.rev + (g?.collapsed ? 1_000_000 : 0)
+    // 折叠状态变化时，头部行必须被判定为「变了」，否则视图不会重画 ▸/▾；
+    // themeEpoch 是同一条契约的另一半：换主题不改 rev，不加它就会「假重绘」。
+    return entry.rev + (g?.collapsed ? 1_000_000 : 0) + this.themeEpoch.value * 10_000_000
   }
 
   firstRowIndex(): number {

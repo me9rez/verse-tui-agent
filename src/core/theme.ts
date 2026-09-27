@@ -193,6 +193,16 @@ export const rendererPalette = reactive(rendererSource()) as Record<
 >
 
 /**
+ * 给 `createTerminalApp({ defaultStyle })` 的**稳定对象**。库自己绘制的内容（transcript 行的
+ * 折叠标记 ▸/▾、行尾空白填充格）不走我们的 segments，拿不到样式，只能由它兜底。
+ *
+ * 与 rendererPalette 同一个道理：**不能传 `styles.text`** —— 访问器在传参那一刻就求值成定值，
+ * 换主题后那个 ▸ 会一直是旧色（2026-09-27 themeshot 探针的「用色纯净度」断言抓到的）。
+ * 库持有这个引用，applyTheme() 就地改字段即可。
+ */
+export const rendererDefaultStyle: { fg: string } = { fg: DEFAULT_THEME.text }
+
+/**
  * 应用一套主题色（来自后端 `theme/list` / `theme/set` 的 `colors`）。
  * 缺失的 token 回退默认值、未识别的键直接忽略 —— 调用方不必先校验（后端已过滤过一遍）。
  */
@@ -203,6 +213,8 @@ export function applyTheme(
   Object.assign(palette, derive({ ...DEFAULT_THEME, ...(colors ?? {}) }, base))
   const next = rendererSource()
   for (const key of RENDERER_KEYS) rendererPalette[key] = next[key]
+  // 库持有的引用，就地改（见 rendererDefaultStyle 的注释）：库自绘的 ▸/▾ 靠它上色
+  rendererDefaultStyle.fg = palette.text
 }
 
 /**

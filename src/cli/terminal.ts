@@ -18,7 +18,7 @@ import {
   type TerminalCleanupHandle,
 } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
-import { rendererPalette, styles } from '../core/theme.ts'
+import { rendererDefaultStyle, rendererPalette, styles } from '../core/theme.ts'
 import { DEFAULT_RPC_URL, effectiveConfig, fetchBoot, setBoot } from '../core/config.ts'
 import { listSessions, sessionDir, setSessionDir } from '../session/persist/index.ts'
 import { formatStamp } from '../core/text.ts'
@@ -95,7 +95,7 @@ const app = createTerminalApp({
       exit(0)
     },
   },
-  defaultStyle: styles.text,
+  defaultStyle: rendererDefaultStyle,
 })
 
 app.mount()

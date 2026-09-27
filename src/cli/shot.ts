@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
 import { HEADER_LABEL } from '../core/brand.ts'
-import { styles } from '../core/theme.ts'
+import { rendererDefaultStyle, styles } from '../core/theme.ts'
 import { rowsToHtml, type CellLike } from '../core/html.ts'
 import { DEFAULT_RPC_URL, effectiveConfig, fetchBoot, setBoot } from '../core/config.ts'
 
@@ -56,7 +56,7 @@ const app = createTerminalApp({
       holder.api = next
     },
   },
-  defaultStyle: styles.text,
+  defaultStyle: rendererDefaultStyle,
 })
 app.mount()
 const out = createStdoutRenderer(app.terminal, {

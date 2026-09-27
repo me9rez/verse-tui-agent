@@ -52,6 +52,10 @@ export function toToolRow(entry: ToolEntry, group: Group | undefined): TTranscri
   // 所以「按工具类型上色」要把彩色部分放进 summary（读源码确认的渲染顺序，见 README 的实测表）。
   // 顺序上先画 title 再画 summary，于是 title 只留那个状态点。
   const summary: TTranscriptSegment[] = [
+    // 状态点必须放 summary 才上得了色：库把 tool-call 的 title **原样画出、不接受样式**，
+    // 于是它落到 renderer 的 defaultStyle（= 启动时的快照，换主题不跟着变，light 下那个 ●
+    // 会一直是 dark 的 text 色）。2026-09-27 由 themeshot 探针的「用色纯净度」断言抓到。
+    { text: dot, style: entry.status === 'error' ? styles.statusErr : styles.faint },
     { text: entry.title, style: toolHeaderStyle(entry.title) },
     { text: `  · ${suffix}`, style: entry.status === 'error' ? styles.statusErr : styles.faint },
   ]
@@ -59,7 +63,8 @@ export function toToolRow(entry: ToolEntry, group: Group | undefined): TTranscri
   return {
     kind: 'tool-call',
     key: entry.key,
-    title: dot,
+    // 状态点已经挪进 summary 上色，这里留空，否则会画出两个点
+    title: '',
     // 只用于让库画对 ▸/▾；真正的显隐由 visibleEntries() 过滤
     collapsed,
     summary,

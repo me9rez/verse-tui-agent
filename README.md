@@ -161,6 +161,8 @@ npx -y -p @google/design.md designmd lint DESIGN.md   # 规范校验：0 error�
 
 ```bash
 node src/probes/mdline.ts   # 行级 markdown 的解析断言（17 项：嵌套分档 / 任务项 / 裸链接 / 删除线降级 / snake_case 不误判 / 回归）
+node src/probes/themeshot.ts   # 三主题并列出图，并断言每栏用色都来自本主题（产物 .artifacts/themes-compare.html）
+node src/probes/rpctheme.ts    # theme/list · theme/set 的真实协议往返（需要 pnpm backend 在跑）
 ```
 
 ## 排版与折叠
@@ -503,6 +505,9 @@ Alt+V 贴的图片经历史 provider 以 data URI 随会话 JSONL 明文落盘�
 
 - **带副作用的状态判定不能放在「每次增量都会调」的函数里**：原先「遇到 ``` 就翻转 `inFence`」写在 `classOf()` 里，而 `classOf()` 对**未完成的行每个流式增量都会调一次**、封行时又调一次 → 同一个 ```` ```ts ```` 被翻转奇偶次，围栏状态时对时错（表现是代码块有时单色、有时压根没被当成代码）。现在围栏只在 `commit()`（封行，每行一次）里翻转，`classOf()` 是纯函数。
 - **`styles` / `syntax` 别标成 `Record<string, Style>`**：那样 `styles.thinkingHeader` 这类拼错的键 tsc 查不出来，运行时拿到 `undefined` → 那一行**静默不上色**（终端不会报错）。本仓库曾有 3 个这样的引用（`thinkingHeader` / `userPrompt` / `dim`，其中 `dim` 影响所有工具输出行），改成强类型 const 后 tsc 立刻全部报出来。
+- **「不改内容、只改颜色」的操作必须让每一行的版本都变**：库靠 `dataSource.getRowVersion(i)` 判断某行要不要重新 `getRow`，而它平时返回的是该行自己的 `rev`（内容修订号）。换主题不改内容 → **大部分行被判定为没变，屏幕上留着一半旧颜色**。现在 `store.repaintAll()` 递增一个 `themeEpoch` 并混进行版本里。这个 bug 光看「`store.version` 有没有递增」抓不到（它确实递增了），是把 buffer 里每个格子的颜色与该主题 palette 逐个比对才现形的（`src/probes/themeshot.ts`）。
+- **`createTerminalApp({ defaultStyle })` 是启动时的快照**：库把它拷一份留着，换主题时改传进去的那个对象**不跟**（传可变对象实测无效）。于是库自绘的内容——transcript 行的折叠标记 `▸`/`▾`、行尾空白填充格——永远停在启动那套颜色。这是库的限制：`themeshot.ts` 的用色断言把这一个快照色单列允许，其余任何跨主题残留仍然算错。
+- **`tool-call` 行的 `title` 不接受样式**：库把 title 原样画出（`▾ <title>`），传 `style` 会被忽略，颜色落到上一条那个快照上。所以工具行的状态点 `●`/`✗` 放进 `summary` 的第一段（见 `rows.ts` 的 `toToolRow`），title 留空。
 
 ## 已知边界
 
