@@ -18,6 +18,9 @@ import type { Entry, Group, GroupKind, LineEntry, Preset, Role, ToolEntry, ToolS
 let seq = 0
 const nextKey = (prefix: string) => `${prefix}-${++seq}`
 
+/** 无序列表的分档符号：按嵌套深度轮换，让层级在一眼扫视里看得出来 */
+const BULLET = ['•', '◦', '▪']
+
 /** 行内 markdown：`code` / **bold** / *italic* / [text](url) */
 
 export class LineStream {
@@ -63,17 +66,32 @@ export class LineStream {
     return entry
   }
 
-  /** 行级样式判定：围栏内 / 标题 / 列表 / 引用（纯函数，不再改围栏状态——那是 commit 的事） */
+  /**
+   * 行级样式判定：围栏内 / 标题 / 列表 / 任务项 / 引用（纯函数，不再改围栏状态——那是 commit 的事）
+   *
+   * 缩进：markdown 用前导空格表达嵌套层级，这里换算成相对基准缩进的深度并**保留**它。
+   * 早先这里是 `${this.indent}• `，把前导空白整个丢掉 —— 嵌套列表于是全部对齐在同一列。
+   *
+   * 刻意没做的两件事：
+   *   · 分隔线（`---`/`***`）—— 要画满一行才知道可用宽度，而行级模型拿不到宽度，
+   *     画固定长度在窄左列会折行、在宽左列又短一截，不如交还给库的 wrap 逻辑；
+   *   · `_斜体_` / `__粗体__` —— 正文里 snake_case 标识符（`read_file`）会被误判。
+   */
   private classOf(raw: string): { preset: Preset; text: string; lang?: Lang } | null {
     const trimmed = raw.trim()
     if (this.inFence) return { preset: 'code', text: `${this.indent}  ${raw}`, lang: this.fenceLang }
+    const depth = Math.max(0, Math.floor(((raw.length - raw.trimStart().length) - this.indent.length) / 2))
+    const pad = '  '.repeat(depth)
     const h = /^#{1,6}\s+(.*)$/.exec(trimmed)
     if (h) return { preset: 'heading', text: `${this.indent}${h[1]}` }
+    // 任务项要排在普通 bullet 之前：`- [x] done` 也会被 bullet 的通用规则匹配
+    const t = /^[-*]\s+\[([ xX])\]\s*(.*)$/.exec(trimmed)
+    if (t) return { preset: 'bullet', text: `${this.indent}${pad}${t[1] === ' ' ? '☐' : '☑'} ${t[2]}` }
     const b = /^[-*]\s+(.*)$/.exec(trimmed)
-    if (b) return { preset: 'bullet', text: `${this.indent}• ${b[1]}` }
+    if (b) return { preset: 'bullet', text: `${this.indent}${pad}${BULLET[depth % BULLET.length]} ${b[1]}` }
     const o = /^(\d+)\.\s+(.*)$/.exec(trimmed)
-    if (o) return { preset: 'bullet', text: `${this.indent}${o[1]}. ${o[2]}` }
-    if (/^>\s?/.test(trimmed)) return { preset: 'quote', text: `${this.indent}${trimmed.replace(/^>\s?/, '')}` }
+    if (o) return { preset: 'bullet', text: `${this.indent}${pad}${o[1]}. ${o[2]}` }
+    if (/^>\s?/.test(trimmed)) return { preset: 'quote', text: `${this.indent}${pad}${trimmed.replace(/^>\s?/, '')}` }
     return { preset: 'plain', text: `${this.indent}${raw}` }
   }
 

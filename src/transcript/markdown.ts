@@ -12,7 +12,11 @@ import type { Preset, Role } from './types.ts'
 
 export function inlineSegments(text: string, base: Style, codeStyle: Style): TTranscriptSegment[] {
   const out: TTranscriptSegment[] = []
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))|(\*[^*]+\*)/g
+  // 顺序即优先级：行内代码 > 粗体 > 链接 > 删除线 > 斜体 > 裸 URL。
+  // 刻意**不认** `_斜体_` / `__粗体__`：正文里 snake_case 的标识符（`read_file`、
+  // `cache_read_input_token_count`）会被误判成强调，这个 TUI 里代价远大于收益。
+  const re =
+    /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))|(~~[^~]+~~)|(\*[^*]+\*)|(https?:\/\/[^\s)]+)/g
   let last = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
@@ -25,6 +29,22 @@ export function inlineSegments(text: string, base: Style, codeStyle: Style): TTr
     } else if (token.startsWith('[')) {
       const close = token.indexOf('](')
       out.push({ text: token.slice(1, close), style: base, href: token.slice(close + 2, -1) })
+    } else if (token.startsWith('~~')) {
+      // 终端画不出删除线（core 的 Style 只有 bold/dim/italic/underline/inverse/href），
+      // 用 dim 弱化表达；不假装自己划了线。
+      out.push({ text: token.slice(2, -2), style: { ...base, dim: true } })
+    } else if (token.startsWith('http')) {
+      // 裸 URL 也当链接：href 会进库的链接命中区（Tab 聚焦 / 点击激活），
+      // 所以句末的标点不能算进 URL，要拆出来还给它 —— 中英文标点都得剥
+      // （只剥 ASCII 时「见 https://a.dev/x。」会把中文句号一起吃进去）。
+      let url = token
+      let tail = ''
+      while (url && /[.,;:!?。，、；：！？）】」』]$/.test(url)) {
+        tail = url.slice(-1) + tail
+        url = url.slice(0, -1)
+      }
+      out.push({ text: url, style: { ...base, underline: true }, href: url })
+      if (tail) out.push({ text: tail, style: base })
     } else {
       out.push({ text: token.slice(1, -1), style: { ...base, italic: true } })
     }
