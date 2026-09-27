@@ -22,6 +22,7 @@ import { setBackendModel } from './model.ts'
 import { setBackendMode } from './mode.ts'
 import { setBackendUsage } from './usage.ts'
 import { DEFAULT_RPC_URL, setBoot, type VerseBoot } from '../core/config.ts'
+import { setBackendTheme, type ThemeCatalog } from './theme.ts'
 
 export type RpcOptions = {
   /** 后端地址，默认 DEFAULT_RPC_URL（客户端不读配置文件，改端口用 --url） */
@@ -154,6 +155,10 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
         // 配置也从后端拿（唯一来源：config/get 的脱敏视图；失败则维持 BUILTIN）
         rpcCall(sock, 'config/get')
           .then((r) => setBoot((r ?? null) as VerseBoot | null))
+          .catch(() => {})
+        // 主题：色板与自定义主题清单都由后端解析（只有它读得到 <VERSE_HOME>/themes）
+        rpcCall(sock, 'theme/list')
+          .then((r) => setBackendTheme((r ?? null) as ThemeCatalog | null))
           .catch(() => {})
         refreshMode(sock)
       }
@@ -300,6 +305,17 @@ export function createRpcSession(opts: RpcOptions = {}): AgentSession {
       const sock = await ensureSocket()
       const r = (await rpcCall(sock, 'thinking/set', { effort })) as { effort?: unknown } | null
       return typeof r?.effort === 'string' && r.effort ? r.effort : effort
+    },
+    async getTheme(): Promise<unknown> {
+      const sock = await ensureSocket()
+      return rpcCall(sock, 'theme/list')
+    },
+    async setTheme(name: string): Promise<string> {
+      const sock = await ensureSocket()
+      const r = (await rpcCall(sock, 'theme/set', { name })) as ThemeCatalog | null
+      // 后端已经把 19 个 token 解析好：换色不是「回填数据」而是立刻生效，所以这里顺手应用
+      setBackendTheme(r)
+      return r?.current ?? name
     },
   }
 }

@@ -1,0 +1,26 @@
+{
+  "name": "ember",
+  "displayName": "Ember",
+  "base": "dark",
+  "colors": {
+    "primary": "#83A598",
+    "accent": "#FE8019",
+    "text": "#EBDBB2",
+    "textStrong": "#FBF1C7",
+    "textDim": "#A89984",
+    "textMuted": "#7C6F64",
+    "border": "#665C54",
+    "borderFocus": "#FE8019",
+    "success": "#B8BB26",
+    "warning": "#FABD2F",
+    "error": "#FB4934",
+    "diffAdded": "#B8BB26",
+    "diffRemoved": "#FB4934",
+    "diffAddedStrong": "#D5C46B",
+    "diffRemovedStrong": "#FB6B57",
+    "diffGutter": "#7C6F64",
+    "diffMeta": "#A89984",
+    "roleUser": "#FABD2F",
+    "shellMode": "#D3869B"
+  }
+}

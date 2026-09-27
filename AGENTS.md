@@ -39,6 +39,7 @@ Verse —— 用 Vue 3 + `@simon_he/vue-tui` 搭的**终端流式 agent TUI**，
 | `pnpm model` | vitest：`/model` 选择器（**打真模型**） | **是** | 否 |
 | `pnpm open` | vitest：`/open` 会话选择器（离线 mock + 临时会话目录） | 否 | 否 |
 | `pnpm effort` | vitest：`/effort` 思考强度命令（离线 mock） | 否 | 否 |
+| `pnpm theme` | vitest：`/theme` 主题命令（离线 mock + 内置主题表） | 否 | 否 |
 | `pnpm image` | vitest：Alt+V 剪贴板贴图（离线 mock + 能力门控） | 否 | 否 |
 | `pnpm hotkeys` | vitest：Alt+M/Alt+E 快捷键 + 状态栏 usage 格式化（离线） | 否 | 否 |
 | `pnpm test:backend` | pytest 全量（protocol + agent + switch，agent/switch 打真模型） | 自拉或复用 8765 | 否 |
@@ -87,7 +88,8 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 | 新交互能力（审批、diff 预览…） | 新事件 type + `rpc_protocol.py`（事件/错误码）+ 落一个 `methods_*.py` 处理器并在 `dispatch.py` 注册 + 前端 `TurnSink` 映射 | 已有字段语义与「一轮一个终态」 |
 | 新配置项 | `backend/config.py` 的 `DEFAULTS` / `DEFAULT_TUI` + `docs/config.example.toml` / `docs/tui.example.toml` + `README` 配置表 | — |
 | 新 markdown 语法 | 内联改 `src/transcript/markdown.ts` 的 `inlineSegments`，块级改 `src/transcript/store.ts` 的 `classOf`，并在 `src/probes/mdline.ts` 补一条能变红的断言 | 别让 `classOf` 变成有状态的（围栏翻转只在 `commit()` 里做，它会被未完成行的每个增量调用） |
-| 新排版/配色 | `src/core/theme.ts`（hex 单源）+ `src/transcript/store.ts`，并同步仓库根 **`DESIGN.md`**（`node src/probes/lyra-tokens.ts` 守着两边逐项同值） | 别在组件里散写颜色，也别让文档与 `palette` 漂移 |
+| 新排版/配色 | `src/core/theme.ts`（hex 单源）+ `src/transcript/store.ts`，并同步仓库根 **`DESIGN.md`**（`node src/probes/theme-tokens.ts` 守着 theme.ts / `backend/theme.py` / DESIGN.md 三方逐项同值） | 别在组件里散写颜色，也别让文档与 `palette` 漂移 |
+| 新主题 token / 主题行为 | 后端 `backend/theme.py` 的 `DARK`/`LIGHT`/`TOKENS`（唯一基准）+ 前端 `src/core/theme.ts` 的 `THEME_TOKENS`/`DEFAULT_THEME`/`derive()` 映射；协议 `rpc_protocol.py` 的 `theme/list`·`theme/set` + `methods_theme.py` 处理器 | Kimi 的 19 个 token 名是「主题文件互通」的前提，别改名；语法色只能按 `derive()` 的规则派生，别引入体系外的色 |
 
 `src/core/config.ts` 的 `BUILTIN_CONFIG` 必须与 `backend/config.py` 的 `DEFAULTS` **同值**：前端在 gateway
 连不上时用它兜底（保住离线 mock）。两边改一边就是漂移——`/env` 的「配置文件」行能发现（有 sources 才说明读到真配置）。
@@ -100,6 +102,8 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 - **❌ 引入第二个后端进程 / 第二套会话存储。**
 - **协议只加不改**：新事件类型可以加（客户端忽略未知 type），已有字段语义不改；**一轮恰好一个终态**（result 或 error）。
 - **前端不读任何配置文件与业务环境变量**（唯一 `VERSE_HOME` 换数据目录）；要新配置项就加进 TOML + `config/get`。
+- **主题文件只由后端读**：`<VERSE_HOME>/themes/*.json`（见 `backend/theme.py`），前端拿 `theme/list` 下发的
+  解析结果上色；CSS/组件里不许出现裸 hex（色值只在 `theme.ts` + `DESIGN.md`）。未知主题名回 -32602。
 - **测试不许往仓库写数据**：`test/smoke|sessions|open` 用 `setSessionDir(临时目录)`，`rpc|complete|model|probes` 传 `persist: false`。
   产物一律落 `./.artifacts/`（已 gitignore）。
 - **密钥、真实账号信息（昵称/uid/邮箱/端点 token）绝不进代码、测试、文档、示例或 git 历史**；示例数据用中性占位名。

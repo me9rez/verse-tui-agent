@@ -1,5 +1,5 @@
 /**
- * 弹窗域：把三个选择器（/model、/open、/effort）的装配收在一处。
+ * 弹窗域：把四个选择器（/model、/open、/effort、/theme）的装配收在一处。
  *
  * 三者只有「条目来源、标题、条目上限、选中语义」不同，开关与受控高亮的样板逐字相同
  *（受控高亮必须双向绑：TCommandPalette 源码读 props.selectedIndex ?? inner，只传静态值会冻结 ↑↓）。
@@ -13,6 +13,7 @@ import type { TranscriptStore } from '../../transcript/index.ts'
 import type { EffortControl } from '../hooks/useEffortControl.ts'
 import type { ModelControl } from '../hooks/useModelControl.ts'
 import type { SessionController } from '../hooks/useSessionController.ts'
+import type { ThemeControl } from '../hooks/useThemeControl.ts'
 
 export const PickerStack = defineComponent({
   name: 'PickerStack',
@@ -21,6 +22,7 @@ export const PickerStack = defineComponent({
     model: { type: Object as PropType<ModelControl>, required: true },
     session: { type: Object as PropType<SessionController>, required: true },
     effort: { type: Object as PropType<EffortControl>, required: true },
+    theme: { type: Object as PropType<ThemeControl>, required: true },
     store: { type: Object as PropType<TranscriptStore>, required: true },
   },
   setup(props) {
@@ -83,6 +85,24 @@ export const PickerStack = defineComponent({
         },
         onSelect: (item: TCommandPaletteItem) => {
           void props.effort.applySwitch(String(item.value))
+        },
+      }),
+      // /theme：条目来自 theme/list（后端扫 <VERSE_HOME>/themes 后解析）；mock 下就是内置 dark/light
+      h(CommandPicker, {
+        open: props.theme.pickerOpen.value,
+        title: '选择主题',
+        items: props.theme.items.value,
+        selectedIndex: props.theme.selIdx.value,
+        maxVisibleItems: 10,
+        cols: props.cols,
+        onClose: () => {
+          props.theme.pickerOpen.value = false
+        },
+        onIndexChange: (i: number) => {
+          props.theme.selIdx.value = i
+        },
+        onSelect: (item: TCommandPaletteItem) => {
+          void props.theme.applySwitch(String(item.value))
         },
       }),
     ]

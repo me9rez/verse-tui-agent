@@ -33,6 +33,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { cmd: '/fold', desc: '折叠/展开全部（同一个 Ctrl+O）' },
   { cmd: '/model', usage: '[<id>]', desc: '弹出模型选择器；带 id 直切（plan/todos 会重置）' },
   { cmd: '/effort', usage: '[<档位>]', desc: '弹出思考强度选择器；带档位直切（low/medium/high/xhigh/max/off）' },
+  { cmd: '/theme', usage: '[<名字>]', desc: '弹出主题选择器；带名字直切（内置 dark/light，自定义看 <VERSE_HOME>/themes/*.json）' },
   { cmd: '/exit', desc: '退出' },
 ]
 

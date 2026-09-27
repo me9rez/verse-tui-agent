@@ -107,29 +107,43 @@ tui  agent=rpc speed=1 persist=true · session_dir=…
 | 滚轮 / `PgUp` | 翻历史；一旦你往上滚，新内容不再把你拽回底部 |
 | **输入 `/`** | **命令自动补全**：↑↓ 选择 · Enter/Tab 采用（再按 Enter 发送）· 模糊匹配、与 `/help` 同一张命令表 |
 | **Shift+Tab** | **切 harness 模式 plan ↔ execute**（仅 rpc；当前模式在右列 `模式` 区与状态栏模式段常驻显示，plan 高亮；**切换不再往转写写通知**——写进转写会刷屏，mock 提示不支持） |
-| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model [<id>]`（无参弹模型选择器，带 id 直切） `/effort [<档位>]`（无参弹思考强度选择器：low/medium/high/xhigh/max/off，带档位直切） `/exit` |
+| 命令 | `/help` `/clear` `/long` `/mock` `/rpc` `/env` `/fold` `/model [<id>]`（无参弹模型选择器，带 id 直切） `/effort [<档位>]`（无参弹思考强度选择器：low/medium/high/xhigh/max/off，带档位直切） `/theme [<名字>]`（无参弹主题选择器，带名字直切） `/exit` |
 | 会话 | `/sessions` 列表（▶ = 当前）· `/open [序号\|id]`（无参弹选择器）切换 · `/new [标题]` 新建 · `/rename <标题>` 改名 · `/delete <序号\|id>` 删除 |
 
 `/long` 会吐一段长回答，专门用来看长内容下的增量重绘与滚动保持。
 
-## 视觉风格：shadcn「Lyra」+ blue 主色
+## 视觉风格：Kimi Code 色板 + shadcn「Lyra」形状
 
-界面语言取自 shadcn/create 的 **Lyra** 风格：**零圆角、方正锐利、为等宽字体而生**。shadcn 对它的定位原话就是
-「developer tools, terminals, and technical interfaces」—— 终端界面是它的主场，我们只把规则翻译成终端能表达的形式。
+颜色取自 **Kimi Code CLI** 的 19 个 token（`primary` / `textDim` / `diffGutter` …），形状取自
+shadcn/create 的 **Lyra**：**零圆角、方正锐利、为等宽字体而生**（官方定位原话「developer tools,
+terminals, and technical interfaces」）。两半各管一件事 —— Kimi 只管颜色，Lyra 只管形状。
 
 | 维度 | 规则 |
 |---|---|
 | 形状 | 圆角恒为 0：只用直角线 `┌ ┐ └ ┘ ─ │`，不用圆角字符（`╭ ╮ ╰ ╯`）与双线框（`╔ ═ ║`） |
 | 层次 | 靠**明度 + 字重 + 描边**，不靠色相；颜色只承载语义（强调 / 成功 / 警告 / 错误 / 语法类型） |
-| 色值 | 全部是 shadcn registry 真值经 oklch→sRGB 换算出的 hex（**不是挑的**）：骨架用 `neutral`、主色用 `blue`、语义色取默认 `chart` 调色板 |
-| 单一来源 | `src/core/theme.ts` 的 `palette` 是唯一色值源（出图用的 `core/html.ts` 也引它），文档副本是仓库根的 **`DESIGN.md`** |
+| 色值 | Kimi Code 文档 dark / light 两列的**真值**（不是挑的），对比度按 WCAG 实测（见 `DESIGN.md` 的 Colors） |
+| 单一来源 | `src/core/theme.ts` 的 `palette`（由 19 个 token 派生）是唯一色值源（出图用的 `core/html.ts` 也引它）；后端基准在 `backend/theme.py`；文档副本是仓库根的 **`DESIGN.md`** |
 
-**一处最容易踩的判据**：shadcn 的 `primary` 是「按钮**填充**色」的语义，暗色下它是深蓝 `#193cb8`，对暗底只有 **2.24:1** ——
-拿它当强调文字会看不清。所以：`primary` 只做**填充底**（选中项 = 该底 + `#eff6ff` 字，8.11:1），
-强调前景一律用同主题亮蓝 `#2b7fff`（5.26:1）。这条写进了 `DESIGN.md` 的 Colors 一节。
+**主题系统**（`/theme`）：内置 `dark` / `light` 两套基准；自定义主题写成 JSON 放进
+`<VERSE_HOME>/themes/`（默认 `~/.verse/themes/`），**文件名即主题名**，schema 与 Kimi 相同：
+
+```json
+{ "name": "ember", "displayName": "Ember", "base": "dark", "colors": { "primary": "#83A598" } }
+```
+
+只写想覆盖的 token，其余沿用 `base` 调色板（做浅色主题必须写 `"base": "light"`）；色值不合法**只丢那一项**，
+坏文件**只跳过它自己**。`/theme` 每次打开重扫目录（新加文件不用重启），只做**会话内**切换 ——
+要常驻就写 `tui.toml` 的 `theme = "ember"`。
+
+**主题文件由后端读**（前端不读任何配置文件与业务环境变量，见 AGENTS §5），走协议的
+`theme/list` / `theme/set`：色板在后端解析好再下发，前端只负责上色（换色会 `store.bump()` 全量重绘）。
+
+一处最容易踩的判据：`primary`（`#4FA8FF`）是**前景**语义（链接 / 选中 / 聚焦 / 徽章），当填充底时必须配
+`primaryFg`（近黑，7.90:1）—— 亮蓝底压白字读不了。这条写进了 `DESIGN.md` 的 Colors 一节。
 
 ```bash
-node src/probes/lyra-tokens.ts   # 断言 DESIGN.md 的 front matter 与 theme.ts 逐项同值（颜色单源的可执行保障）
+node src/probes/theme-tokens.ts   # 断言 theme.ts / backend/theme.py / DESIGN.md 三方逐项同值（颜色单源的可执行保障）
 npx -y -p @google/design.md designmd lint DESIGN.md   # 规范校验：0 error（含 WCAG 对比度）
 ```
 

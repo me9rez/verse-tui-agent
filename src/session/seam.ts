@@ -76,6 +76,13 @@ export type AgentSession = {
   setThinking?(effort: string): Promise<string>
   /** 切 harness 模式（Shift+Tab）：返回切换后的模式；同值切换不重复通知 */
   setMode?(mode: string): Promise<string>
+  /**
+   * 读可用主题 + 当前解析后的色板（theme/list）。主题文件由**后端**读
+   * （前端不碰配置文件与业务环境变量），所以接缝就是这一对方法。
+   */
+  getTheme?(): Promise<unknown>
+  /** 切主题（/theme <名字>）：后端返回解析后的色板，会话内生效、不写 tui.toml */
+  setTheme?(name: string): Promise<string>
   /** 把「与服务端上下文有关的状态」导出成可 JSON 化的值（没有就返回 undefined） */
   snapshot?(): unknown
   /** 从 snapshot() 的产物恢复；坏的输入要静默忽略（旧文件可能来自更早的版本） */

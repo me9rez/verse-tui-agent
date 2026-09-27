@@ -4,6 +4,8 @@ speed = 1.0             # 流式节奏倍率（1 默认，0.3 更快）
 persist = true          # 会话落盘；false = 完全不动磁盘
 session_dir = ""        # 空 → <repo>/.verse-sessions
 debug_input = false     # true = 原始提交文本按 JSON 记入 .artifacts/input-debug.log
+theme = ""              # 主题名：空 = 内置 dark（Kimi Code 同款调色板，与 light 成对内置）
+                        # 自定义主题放 <VERSE_HOME>/themes/*.json；/theme 只做会话内切换，不写回本文件
 
 [shot]                  # pnpm shot 出图默认（speed 不在此节：--speed > 0.05，不吃 tui.speed）
 cols = 110

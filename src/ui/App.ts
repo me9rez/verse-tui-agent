@@ -24,6 +24,7 @@ import { useTurnRuntime } from './hooks/useTurnRuntime.ts'
 import { useHarnessMode } from './hooks/useHarnessMode.ts'
 import { useModelControl } from './hooks/useModelControl.ts'
 import { useEffortControl } from './hooks/useEffortControl.ts'
+import { useThemeControl } from './hooks/useThemeControl.ts'
 import { useImageAttachment } from './hooks/useImageAttachment.ts'
 import { useStatusBar } from './hooks/useStatusBar.ts'
 import { useSlashCommands } from './hooks/useSlashCommands.ts'
@@ -117,16 +118,20 @@ export const App = defineComponent({
     // 思考强度域：/effort（含 Alt+E 直切）
     const effort = useEffortControl({ session: sessionCtl, ui, store })
     const { effort: effortLevel } = effort
+    // 主题域：/theme。色板由后端解析下发（它才读得到 <VERSE_HOME>/themes），
+    // mock 下退内置 dark/light；换色后 store.bump() 全量重绘（行样式是渲染时求值的）
+    const theme = useThemeControl({ session: sessionCtl, ui, store })
     // 贴图域：Alt+V 剪贴板贴图（待发图片 / 指示条 / 占位符文案）
     const image = useImageAttachment({ session: sessionCtl, imageSupported, store })
     const { chipText: imageChipText, placeholderText } = image
 
-    // 三个选择器互斥：打开一个时关掉另外两个（与拆分前逐字一致）
-    //（选择器本体渲染在 components/PickerStack.ts，三个都吃各自的 model/effort/session 对象）
-    const closeOtherPickers = (keep: 'model' | 'effort' | 'session'): void => {
+    // 四个选择器互斥：打开一个时关掉另外几个
+    //（选择器本体渲染在 components/PickerStack.ts，各自吃自己的 model/effort/session/theme 对象）
+    const closeOtherPickers = (keep: 'model' | 'effort' | 'session' | 'theme'): void => {
       if (keep !== 'model') model.pickerOpen.value = false
       if (keep !== 'effort') effort.pickerOpen.value = false
       if (keep !== 'session') sessionPickerOpen.value = false
+      if (keep !== 'theme') theme.pickerOpen.value = false
     }
 
     // 状态栏域 / 命令域 / 输入域 / 键盘域：都要用到上面各域的对象，所以排在最后。
@@ -150,6 +155,7 @@ export const App = defineComponent({
       turn: turnRuntime,
       model,
       effort,
+      theme,
       invalidate,
       onExit: props.onExit,
       closeOtherPickers,
@@ -291,7 +297,7 @@ export const App = defineComponent({
           }),
           // 三个选择器（/model、/open、/effort）：开关与受控高亮的样板相同、
           // 条目与选中语义不同，装配收在 components/PickerStack.ts（同挂 overlay plane）
-          h(PickerStack, { cols, model, session: sessionCtl, effort, store }),
+          h(PickerStack, { cols, model, session: sessionCtl, effort, theme, store }),
         ]),
       ])
     }

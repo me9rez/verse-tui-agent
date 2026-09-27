@@ -31,6 +31,7 @@ export type VerseBoot = Readonly<{
       persist: boolean
       session_dir: string
       debug_input: boolean
+      theme: string
       shot: { cols: number; rows: number; mid_tool: boolean; prompt: string }
       check: { timeout_ms: number; prompt: string }
     }
@@ -54,6 +55,7 @@ export const BUILTIN_CONFIG: VerseBoot['config'] = {
     persist: true,
     session_dir: '',
     debug_input: false,
+    theme: '',
     shot: { cols: 110, rows: 32, mid_tool: false, prompt: '这个 demo 的流式输出是怎么实现的？' },
     check: { timeout_ms: 150000, prompt: '' },
   },

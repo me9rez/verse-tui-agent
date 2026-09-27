@@ -18,6 +18,7 @@ import { HELP } from '../texts.ts'
 import type { TranscriptStore } from '../../transcript/index.ts'
 import type { EffortControl } from './useEffortControl.ts'
 import type { ModelControl } from './useModelControl.ts'
+import type { ThemeControl } from './useThemeControl.ts'
 import type { SessionController } from './useSessionController.ts'
 import type { TurnRuntime, TurnUi } from './useTurnRuntime.ts'
 
@@ -33,14 +34,15 @@ export type SlashDeps = Readonly<{
   turn: TurnRuntime
   model: ModelControl
   effort: EffortControl
+  theme: ThemeControl
   invalidate(): void
   onExit?(): void
-  /** 三个选择器互斥：打开一个时关掉另外两个 */
-  closeOtherPickers(keep: 'model' | 'effort' | 'session'): void
+  /** 几个选择器互斥：打开一个时关掉另外几个 */
+  closeOtherPickers(keep: 'model' | 'effort' | 'session' | 'theme'): void
 }>
 
 export function useSlashCommands(deps: SlashDeps): SlashRouter {
-  const { store, session, ui, turn, model, effort, invalidate, closeOtherPickers } = deps
+  const { store, session, ui, turn, model, effort, theme, invalidate, closeOtherPickers } = deps
 
   /** /sessions：列出落盘会话（▶ = 当前）；没有就按落盘开关给不同提示 */
   function cmdSessions(): void {
@@ -147,6 +149,16 @@ export function useSlashCommands(deps: SlashDeps): SlashRouter {
     }
   }
 
+  /** /theme [名字]：无参弹选择器，带名字直切（mock 下只有内置 dark / light） */
+  async function cmdTheme(raw: string): Promise<void> {
+    const arg = raw.trim().slice(6).trim()
+    if (!arg) {
+      theme.openPicker(() => closeOtherPickers('theme'))
+    } else {
+      await theme.applySwitch(arg)
+    }
+  }
+
   /** /env：配置展示的唯一来源（gateway 的 config/get 脱敏视图 + 实际读到的 toml） */
   function cmdEnv(): void {
     const b = getBoot()
@@ -157,6 +169,7 @@ export function useSlashCommands(deps: SlashDeps): SlashRouter {
       `providers  ${c.providers.map((p) => `${p.name}(${p.type}) key ${p.api_key || '未设'}`).join(' · ') || '（无）'}`,
       `agent 工作区  ${c.gateway.workspace || '(后端默认 <repo>/.agent-sandbox)'}`,
       `tui  agent=${c.tui.agent} speed=${c.tui.speed} persist=${c.tui.persist}${c.tui.session_dir ? ` · session_dir=${c.tui.session_dir}` : ''}`,
+      `theme  ${c.tui.theme || '（空 = 内置 dark）'} · 当前 ${theme.displayTheme.value} · 自定义主题放 <VERSE_HOME>/themes/*.json（/theme 只做会话内切换）`,
       `配置文件  ${b ? (b.sources.length ? b.sources.join(' + ') : '无（全部默认值）') : '(未取到)'}`,
     ]) store.addNote(line)
   }
@@ -190,6 +203,8 @@ export function useSlashCommands(deps: SlashDeps): SlashRouter {
       void cmdModel(raw)
     } else if (cmd === '/effort' || cmd.startsWith('/effort ')) {
       void cmdEffort(raw)
+    } else if (cmd === '/theme' || cmd.startsWith('/theme ')) {
+      void cmdTheme(raw)
     } else if (cmd === '/env') {
       cmdEnv()
     } else if (cmd === '/long') {
