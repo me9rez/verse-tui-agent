@@ -46,6 +46,21 @@ JSON-RPC 2.0 over WebSocket 协议
         下一轮生效；changed=true 时框架自动往下一轮注入 [Mode changed] 通知。
         同值切换 changed=false 且不发通知；非法 mode → -32602；空参数 → -32602。
         依赖服务端会话对象复用（runtime.RT.sessions）；进程重启后模式回到默认。
+  {"jsonrpc":"2.0","id":12,"method":"theme/list"}
+      → 应答 {"result":{"current":"<生效主题名>","requested":"<配置里写的主题名>",
+             "base":"dark"|"light","colors":{<19 个 token → "#rrggbb">},
+             "themes":[{"name","displayName","base","colors","source":"builtin"|"custom","path"?}]}}
+      → 主题文件由后端读（前端不读配置文件与业务环境变量）：扫 <VERSE_HOME>/themes/*.json，
+        每次调用重扫目录（新加的主题文件不用重启）；内置 dark/light 恒在（source="builtin"）。
+        自定义主题 schema 与 Kimi Code 相同：
+          {"name":"ember","displayName"?,"base"?:"dark"|"light","colors":{"<token>":"#rrggbb"}}
+        未写的 token 回退 base 调色板；非法色值/未知 token 静默跳过；坏文件只跳过它自己。
+        config/get 的 tui.theme 是同一份配置（谁能改：用户写 tui.toml）。
+  {"jsonrpc":"2.0","id":13,"method":"theme/set","params":{"name":"<主题名>"}}
+      → 应答 {"result":{"name":"<生效名>","base":"dark"|"light","colors":{<19 个 token>}}}
+      → 语义：**会话内**切换，不写 tui.toml（持久化由用户在 tui.toml 的 theme 字段自己决定；
+        没找到对应主题文件时按内置名处理，完全认不出 → -32602）。
+        前端拿到 colors 后重建 palette 并把转写区全量重绘（行样式是渲染时求值的，见 rows.ts）。
   {"jsonrpc":"2.0","id":3,"method":"initialize"} / {"method":"ping"}
 
 服务端 → 客户端（一轮进行中的流式事件，通知，无 id）：
@@ -102,7 +117,7 @@ SERVER_VERSION = "1.0.0"
 # （test_unit_protocol 守着这条不变量——清单撒谎会让客户端误判服务端能力）
 METHODS = ["initialize", "ping", "agent/chat", "agent/cancel", "agent/reset",
            "model/set", "thinking/get", "thinking/set",
-           "mode/get", "mode/set", "config/get"]
+           "mode/get", "mode/set", "theme/list", "theme/set", "config/get"]
 
 
 def event(session: str, ev: dict[str, Any]) -> dict[str, Any]:

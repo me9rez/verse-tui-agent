@@ -47,6 +47,8 @@ DEFAULT_TUI: dict[str, Any] = {
     "persist": True,
     "session_dir": "",
     "debug_input": False,
+    # 主题名：空 = 内置 dark（Kimi Code 同款调色板）；自定义主题放 <VERSE_HOME>/themes/*.json
+    "theme": "",
     "shot": {"cols": 110, "rows": 32, "mid_tool": False,
              "prompt": "这个 demo 的流式输出是怎么实现的？"},
     "check": {"timeout_ms": 150000, "prompt": ""},

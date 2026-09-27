@@ -16,6 +16,7 @@ import methods_agent
 import methods_config
 import methods_model
 import methods_session
+import methods_theme
 import rpc_protocol
 from rpc_protocol import Conn
 
@@ -32,6 +33,8 @@ HANDLERS: dict[str, Handler] = {
     "thinking/set": methods_model.h_thinking_set,
     "mode/get": methods_session.h_mode_get,
     "mode/set": methods_session.h_mode_set,
+    "theme/list": methods_theme.h_theme_list,
+    "theme/set": methods_theme.h_theme_set,
     "config/get": methods_config.h_config_get,
     "initialize": methods_config.h_initialize,
     "ping": methods_config.h_ping,
