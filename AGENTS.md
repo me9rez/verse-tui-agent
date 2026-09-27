@@ -86,7 +86,8 @@ src/cli → src/ui → src/session → src/transcript → src/core      （test/
 | 新模型 / provider | `~/.verse/config.toml` 的 `[providers.*]` / `[models.*]` | 协议、事件模型 |
 | 新交互能力（审批、diff 预览…） | 新事件 type + `rpc_protocol.py`（事件/错误码）+ 落一个 `methods_*.py` 处理器并在 `dispatch.py` 注册 + 前端 `TurnSink` 映射 | 已有字段语义与「一轮一个终态」 |
 | 新配置项 | `backend/config.py` 的 `DEFAULTS` / `DEFAULT_TUI` + `docs/config.example.toml` / `docs/tui.example.toml` + `README` 配置表 | — |
-| 新排版/配色 | `src/core/theme.ts`（hex 单源）+ `src/transcript/store.ts` | 别在组件里散写颜色 |
+| 新 markdown 语法 | 内联改 `src/transcript/markdown.ts` 的 `inlineSegments`，块级改 `src/transcript/store.ts` 的 `classOf`，并在 `src/probes/mdline.ts` 补一条能变红的断言 | 别让 `classOf` 变成有状态的（围栏翻转只在 `commit()` 里做，它会被未完成行的每个增量调用） |
+| 新排版/配色 | `src/core/theme.ts`（hex 单源）+ `src/transcript/store.ts`，并同步仓库根 **`DESIGN.md`**（`node src/probes/lyra-tokens.ts` 守着两边逐项同值） | 别在组件里散写颜色，也别让文档与 `palette` 漂移 |
 
 `src/core/config.ts` 的 `BUILTIN_CONFIG` 必须与 `backend/config.py` 的 `DEFAULTS` **同值**：前端在 gateway
 连不上时用它兜底（保住离线 mock）。两边改一边就是漂移——`/env` 的「配置文件」行能发现（有 sources 才说明读到真配置）。

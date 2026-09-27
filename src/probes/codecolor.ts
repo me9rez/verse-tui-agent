@@ -4,7 +4,7 @@
  */
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../ui/App.ts'
-import { styles } from '../core/theme.ts'
+import { styles, palette } from '../core/theme.ts'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const holder: { api: AppApi | null } = { api: null }
@@ -61,7 +61,7 @@ const segsOf = (r: Record<string, unknown>): Seg[] => (Array.isArray(r.segments)
 let found = 0
 for (const [i, r] of rows.entries()) {
   const segs = segsOf(r)
-  const allCode = segs.length > 0 && segs.every((s) => s.style?.bg === '#23252e')
+  const allCode = segs.length > 0 && segs.every((s) => s.style?.bg === palette.codeBg)
   if (!allCode) continue
   found++
   if (found <= 3) {

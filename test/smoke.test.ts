@@ -17,7 +17,7 @@ import { afterAll, expect, test } from 'vitest'
 import { listSessions, loadSession, setSessionDir } from '../src/session/persist/index.ts'
 import { createStdoutRenderer, createTerminalApp } from '@simon_he/vue-tui/cli'
 import { App, type AppApi } from '../src/ui/App.ts'
-import { styles } from '../src/core/theme.ts'
+import { styles, palette } from '../src/core/theme.ts'
 import { cellWidth } from '../src/core/text.ts'
 // 右列宽度常量：断言竖线画在哪一列要跟 layout 的定义同源（写死数字会漂移）
 import { TIPS_COLS } from '../src/ui/layout.ts'
@@ -214,7 +214,8 @@ test('smoke：流式 / 渲染 / 折叠 / 颜色 / 落盘 / 中断全链路', { t
   // 代码行：底色是 codeBg（正文里只有代码块用这个底色）。单行可能只有「基础色 + 函数色」
   // 两种，所以要跨行取并集才说明高亮器真的在工作（关键字/函数/注释至少两类）。
   const codeRows = rowsJson().filter(
-    (r) => segsOf(r).length >= 2 && segsOf(r).every((s) => s.style?.bg === '#23252e'),
+    // 代码块底取自 theme 的 codeBg（不是写死的 hex）——换色板时这条断言要跟着走，别再抄一遍值
+    (r) => segsOf(r).length >= 2 && segsOf(r).every((s) => s.style?.bg === palette.codeBg),
   )
   const codeFgs = [...new Set(codeRows.flatMap((r) => fgsOf(r)))]
   check(
